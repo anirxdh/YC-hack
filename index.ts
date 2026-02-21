@@ -1,8 +1,42 @@
 import { MCPServer, object, text, error, widget, completable, oauthWorkOSProvider } from "mcp-use/server";
 import { MCPClient } from "mcp-use";
 import { z } from "zod";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
+
+// ============================================
+// Contacts Store (JSON key-value)
+// ============================================
+const CONTACTS_PATH = resolve(process.cwd(), "contacts.json");
+
+function loadContacts(): Record<string, string> {
+  try {
+    if (existsSync(CONTACTS_PATH)) {
+      return JSON.parse(readFileSync(CONTACTS_PATH, "utf-8"));
+    }
+  } catch {}
+  return {};
+}
+
+function saveContacts(contacts: Record<string, string>) {
+  writeFileSync(CONTACTS_PATH, JSON.stringify(contacts, null, 2), "utf-8");
+}
+
+function resolvePhoneNumber(nameOrNumber: string): { name: string | null; phone: string } | null {
+  // If it looks like a phone number already, return as-is
+  if (nameOrNumber.startsWith("+") || /^\d{10,}$/.test(nameOrNumber)) {
+    return { name: null, phone: nameOrNumber };
+  }
+  // Otherwise look up in contacts (case-insensitive)
+  const contacts = loadContacts();
+  const key = Object.keys(contacts).find(
+    (k) => k.toLowerCase() === nameOrNumber.toLowerCase()
+  );
+  if (key) {
+    return { name: key, phone: contacts[key] };
+  }
+  return null;
+}
 
 // ============================================
 // Server Setup
@@ -206,14 +240,83 @@ async function connectBackendServers() {
 }
 
 // ============================================
-// Local Tool 1: Make a phone call via Twilio
+// Local Tool 1: Add a contact
+// ============================================
+server.tool(
+  {
+    name: "add-contact",
+    description: "Save a contact with a name and phone number. Use this to store contacts so you can call or text them by name later.",
+    schema: z.object({
+      name: z.string().describe("The contact's name (e.g. 'Anirudh')"),
+      phone: z.string().describe("The contact's phone number with country code (e.g. '+19525551234')"),
+    }),
+  },
+  async ({ name, phone }) => {
+    const contacts = loadContacts();
+    contacts[name] = phone;
+    saveContacts(contacts);
+    return object({ saved: true, name, phone, totalContacts: Object.keys(contacts).length });
+  }
+);
+
+// ============================================
+// Local Tool 2: List all contacts
+// ============================================
+server.tool(
+  {
+    name: "list-contacts",
+    description: "List all saved contacts. Returns all names and phone numbers.",
+    schema: z.object({}),
+    readOnlyHint: true,
+  },
+  async () => {
+    const contacts = loadContacts();
+    const entries = Object.entries(contacts);
+    if (entries.length === 0) {
+      return text("No contacts saved yet. Use add-contact to save some.");
+    }
+    return object({
+      totalContacts: entries.length,
+      contacts: Object.fromEntries(entries),
+    });
+  }
+);
+
+// ============================================
+// Local Tool 3: Remove a contact
+// ============================================
+server.tool(
+  {
+    name: "remove-contact",
+    description: "Remove a contact by name.",
+    schema: z.object({
+      name: z.string().describe("The name of the contact to remove"),
+    }),
+  },
+  async ({ name }) => {
+    const contacts = loadContacts();
+    const key = Object.keys(contacts).find(
+      (k) => k.toLowerCase() === name.toLowerCase()
+    );
+    if (!key) {
+      return error(`Contact "${name}" not found. Use list-contacts to see all contacts.`);
+    }
+    delete contacts[key];
+    saveContacts(contacts);
+    return object({ removed: true, name: key, totalContacts: Object.keys(contacts).length });
+  }
+);
+
+// ============================================
+// Local Tool 4: Make a phone call via Twilio
+// Accepts a phone number OR a contact name
 // ============================================
 server.tool(
   {
     name: "make-call",
-    description: "Make a phone call to someone using Twilio. The call will play a spoken message to the person.",
+    description: "Make a phone call to someone using Twilio. You can pass a phone number OR a contact name (e.g. 'Anirudh'). The call will play a spoken message to the person.",
     schema: z.object({
-      to: z.string().describe("The phone number to call (e.g. +19525551234)"),
+      to: z.string().describe("Phone number (e.g. +19525551234) OR contact name (e.g. 'Anirudh')"),
       message: z.string().describe("The message to speak to the person when they pick up"),
     }),
     widget: {
@@ -231,6 +334,14 @@ server.tool(
       return error("Twilio credentials not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env");
     }
 
+    // Resolve contact name to phone number
+    const resolved = resolvePhoneNumber(to);
+    if (!resolved) {
+      return error(`Contact "${to}" not found. Use add-contact to save them first, or provide a phone number directly.`);
+    }
+    const phoneNumber = resolved.phone;
+    const contactLabel = resolved.name ? `${resolved.name} (${resolved.phone})` : resolved.phone;
+
     const twiml = `<Response><Say voice="alice">${message}</Say></Response>`;
 
     const res = await fetch(
@@ -242,7 +353,7 @@ server.tool(
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({
-          To: to,
+          To: phoneNumber,
           From: fromNumber,
           Twiml: twiml,
         }),
@@ -259,24 +370,25 @@ server.tool(
       props: {
         status: "Call initiated",
         callSid: call.sid,
-        to: call.to,
+        to: contactLabel,
         from: call.from,
         message,
       },
-      output: text(`Call initiated to ${call.to} from ${call.from}. Call SID: ${call.sid}`),
+      output: text(`Call initiated to ${contactLabel} from ${call.from}. Call SID: ${call.sid}`),
     });
   }
 );
 
 // ============================================
-// Local Tool 2: Send SMS via Twilio
+// Local Tool 5: Send SMS via Twilio
+// Accepts a phone number OR a contact name
 // ============================================
 server.tool(
   {
     name: "send-sms",
-    description: "Send an SMS text message to someone using Twilio",
+    description: "Send an SMS text message to someone using Twilio. You can pass a phone number OR a contact name (e.g. 'Anirudh').",
     schema: z.object({
-      to: z.string().describe("The phone number to send the SMS to (e.g. +19525551234)"),
+      to: z.string().describe("Phone number (e.g. +19525551234) OR contact name (e.g. 'Anirudh')"),
       message: z.string().describe("The text message to send"),
     }),
     widget: {
@@ -294,6 +406,14 @@ server.tool(
       return error("Twilio credentials not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env");
     }
 
+    // Resolve contact name to phone number
+    const resolved = resolvePhoneNumber(to);
+    if (!resolved) {
+      return error(`Contact "${to}" not found. Use add-contact to save them first, or provide a phone number directly.`);
+    }
+    const phoneNumber = resolved.phone;
+    const contactLabel = resolved.name ? `${resolved.name} (${resolved.phone})` : resolved.phone;
+
     const res = await fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
       {
@@ -303,7 +423,7 @@ server.tool(
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({
-          To: to,
+          To: phoneNumber,
           From: fromNumber,
           Body: message,
         }),
@@ -320,17 +440,17 @@ server.tool(
       props: {
         status: "SMS sent",
         messageSid: sms.sid,
-        to: sms.to,
+        to: contactLabel,
         from: sms.from,
         body: message,
       },
-      output: text(`SMS sent to ${sms.to} from ${sms.from}. Message SID: ${sms.sid}`),
+      output: text(`SMS sent to ${contactLabel} from ${sms.from}. Message SID: ${sms.sid}`),
     });
   }
 );
 
 // ============================================
-// Local Tool 3: Open camera for photo capture
+// Local Tool 7: Open camera for photo capture
 // ============================================
 server.tool(
   {
@@ -363,6 +483,107 @@ server.tool(
         reason: displayReason,
       },
       output: text(`Camera opened (${selectedCamera} facing). ${displayReason}`),
+    });
+  }
+);
+
+// ============================================
+// Local Tool 8: Group call — call multiple people simultaneously
+// ============================================
+server.tool(
+  {
+    name: "group-call",
+    description: "Call multiple people at the same time with the same message. Pass contact names or phone numbers. All calls are placed simultaneously via Twilio. Example: 'Call Anirudh, Raj, and Priya and say I'm running late'.",
+    schema: z.object({
+      to: z.array(z.string()).describe("List of phone numbers or contact names to call (e.g. ['Anirudh', 'Raj', '+19525551234'])"),
+      message: z.string().describe("The message to speak to everyone when they pick up"),
+    }),
+  },
+  async ({ to, message }) => {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const fromNumber = process.env.TWILIO_PHONE_NUMBER;
+
+    if (!accountSid || !authToken || !fromNumber) {
+      return error("Twilio credentials not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env");
+    }
+
+    // Resolve all contacts first
+    const resolved: { label: string; phone: string }[] = [];
+    const notFound: string[] = [];
+
+    for (const entry of to) {
+      const result = resolvePhoneNumber(entry);
+      if (result) {
+        resolved.push({
+          label: result.name ? `${result.name} (${result.phone})` : result.phone,
+          phone: result.phone,
+        });
+      } else {
+        notFound.push(entry);
+      }
+    }
+
+    if (notFound.length > 0) {
+      return error(`Could not find contacts: ${notFound.join(", ")}. Use add-contact to save them first.`);
+    }
+
+    const twiml = `<Response><Say voice="alice">${message}</Say></Response>`;
+    const authHeader = "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+
+    // Fire all calls simultaneously
+    const results = await Promise.allSettled(
+      resolved.map(async (contact) => {
+        const res = await fetch(
+          `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: authHeader,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+              To: contact.phone,
+              From: fromNumber,
+              Twiml: twiml,
+            }),
+          }
+        );
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`${contact.label}: ${errText}`);
+        }
+        const call = await res.json();
+        return { label: contact.label, callSid: call.sid, status: "initiated" };
+      })
+    );
+
+    const succeeded: { label: string; callSid: string }[] = [];
+    const failed: { label: string; error: string }[] = [];
+
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        succeeded.push(r.value);
+      } else {
+        failed.push({ label: "unknown", error: r.reason?.message || "Unknown error" });
+      }
+    }
+
+    const summary = [
+      `Group call to ${resolved.length} people: "${message}"`,
+      `Succeeded: ${succeeded.length}/${resolved.length}`,
+      ...succeeded.map((s) => `  ✓ ${s.label} — SID: ${s.callSid}`),
+      ...failed.map((f) => `  ✗ ${f.label} — ${f.error}`),
+    ].join("\n");
+
+    return object({
+      message,
+      totalCalls: resolved.length,
+      succeeded: succeeded.length,
+      failed: failed.length,
+      calls: succeeded,
+      errors: failed.length > 0 ? failed : undefined,
+      summary,
     });
   }
 );
