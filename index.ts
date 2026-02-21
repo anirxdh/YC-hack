@@ -206,113 +206,7 @@ async function connectBackendServers() {
 }
 
 // ============================================
-// Local Tool 1: Greet someone
-// ============================================
-server.tool(
-  {
-    name: "greet",
-    description: "Greet someone by name with a friendly welcome message",
-    schema: z.object({
-      name: z.string().describe("The name of the person to greet"),
-    }),
-    readOnlyHint: true,
-  },
-  async ({ name }) => {
-    return text(`Hello, ${name}! Welcome to the MCP Orchestrator.`);
-  }
-);
-
-// ============================================
-// Local Tool 2: Get current date and time
-// ============================================
-server.tool(
-  {
-    name: "get-time",
-    description: "Get the current date and time in ISO format",
-    schema: z.object({}),
-    readOnlyHint: true,
-  },
-  async () => {
-    return object({
-      iso: new Date().toISOString(),
-      readable: new Date().toLocaleString(),
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    });
-  }
-);
-
-// ============================================
-// Local Tool 3: Calculator
-// ============================================
-server.tool(
-  {
-    name: "calculate",
-    description: "Perform a basic math operation on two numbers",
-    schema: z.object({
-      a: z.number().describe("The first number"),
-      b: z.number().describe("The second number"),
-      operation: z
-        .enum(["add", "subtract", "multiply", "divide"])
-        .describe("The math operation to perform"),
-    }),
-    readOnlyHint: true,
-  },
-  async ({ a, b, operation }) => {
-    if (operation === "divide" && b === 0) {
-      return error("Cannot divide by zero");
-    }
-
-    const ops: Record<string, number> = {
-      add: a + b,
-      subtract: a - b,
-      multiply: a * b,
-      divide: a / b,
-    };
-
-    return object({
-      expression: `${a} ${operation} ${b}`,
-      result: ops[operation],
-    });
-  }
-);
-
-// ============================================
-// Local Tool 4: Fetch weather (mock data)
-// ============================================
-const mockWeather: Record<string, { temp: number; conditions: string }> = {
-  "New York": { temp: 22, conditions: "Partly Cloudy" },
-  London: { temp: 15, conditions: "Rainy" },
-  Tokyo: { temp: 28, conditions: "Sunny" },
-  Paris: { temp: 18, conditions: "Overcast" },
-  Sydney: { temp: 25, conditions: "Clear" },
-};
-
-server.tool(
-  {
-    name: "fetch-weather",
-    description:
-      "Fetch the current weather for a city. Available cities: New York, London, Tokyo, Paris, Sydney",
-    schema: z.object({
-      city: z.string().describe("The city to fetch the weather for"),
-    }),
-    readOnlyHint: true,
-  },
-  async ({ city }) => {
-    const weather = mockWeather[city];
-    if (!weather) {
-      return error(`No weather data available for "${city}". Available cities: ${Object.keys(mockWeather).join(", ")}`);
-    }
-
-    return object({
-      city,
-      temperature: `${weather.temp}°C`,
-      conditions: weather.conditions,
-    });
-  }
-);
-
-// ============================================
-// Local Tool 5: Make a phone call via Twilio
+// Local Tool 1: Make a phone call via Twilio
 // ============================================
 server.tool(
   {
@@ -375,7 +269,7 @@ server.tool(
 );
 
 // ============================================
-// Local Tool 6: Send SMS via Twilio
+// Local Tool 2: Send SMS via Twilio
 // ============================================
 server.tool(
   {
@@ -436,7 +330,7 @@ server.tool(
 );
 
 // ============================================
-// Local Tool 7: Open camera for photo capture
+// Local Tool 3: Open camera for photo capture
 // ============================================
 server.tool(
   {
@@ -492,20 +386,6 @@ server.resource(
       connectedServers: connectedBackends.length,
       backends: connectedBackends,
     })
-);
-
-// ============================================
-// Resource: Available cities for weather
-// ============================================
-server.resource(
-  {
-    name: "available-cities",
-    uri: "weather://available-cities",
-    title: "Available Cities",
-    description: "List of cities with weather data available",
-    mimeType: "application/json",
-  },
-  async () => object({ cities: Object.keys(mockWeather) })
 );
 
 // ============================================
