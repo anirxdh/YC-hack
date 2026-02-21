@@ -312,6 +312,112 @@ server.tool(
 );
 
 // ============================================
+// Local Tool 5: Make a phone call via Twilio
+// ============================================
+server.tool(
+  {
+    name: "make-call",
+    description: "Make a phone call to someone using Twilio. The call will play a spoken message to the person.",
+    schema: z.object({
+      to: z.string().describe("The phone number to call (e.g. +19525551234)"),
+      message: z.string().describe("The message to speak to the person when they pick up"),
+    }),
+  },
+  async ({ to, message }) => {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const fromNumber = process.env.TWILIO_PHONE_NUMBER;
+
+    if (!accountSid || !authToken || !fromNumber) {
+      return error("Twilio credentials not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env");
+    }
+
+    const twiml = `<Response><Say voice="alice">${message}</Say></Response>`;
+
+    const res = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64"),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          To: to,
+          From: fromNumber,
+          Twiml: twiml,
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const err = await res.text();
+      return error(`Twilio call failed: ${err}`);
+    }
+
+    const call = await res.json();
+    return object({
+      status: "Call initiated",
+      callSid: call.sid,
+      to: call.to,
+      from: call.from,
+    });
+  }
+);
+
+// ============================================
+// Local Tool 6: Send SMS via Twilio
+// ============================================
+server.tool(
+  {
+    name: "send-sms",
+    description: "Send an SMS text message to someone using Twilio",
+    schema: z.object({
+      to: z.string().describe("The phone number to send the SMS to (e.g. +19525551234)"),
+      message: z.string().describe("The text message to send"),
+    }),
+  },
+  async ({ to, message }) => {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const fromNumber = process.env.TWILIO_PHONE_NUMBER;
+
+    if (!accountSid || !authToken || !fromNumber) {
+      return error("Twilio credentials not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env");
+    }
+
+    const res = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64"),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          To: to,
+          From: fromNumber,
+          Body: message,
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const err = await res.text();
+      return error(`Twilio SMS failed: ${err}`);
+    }
+
+    const sms = await res.json();
+    return object({
+      status: "SMS sent",
+      messageSid: sms.sid,
+      to: sms.to,
+      from: sms.from,
+    });
+  }
+);
+
+// ============================================
 // Resource: Server config and status (dynamic)
 // ============================================
 server.resource(
