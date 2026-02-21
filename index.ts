@@ -1,4 +1,4 @@
-import { MCPServer, object, text, error, completable, oauthWorkOSProvider } from "mcp-use/server";
+import { MCPServer, object, text, error, widget, completable, oauthWorkOSProvider } from "mcp-use/server";
 import { MCPClient } from "mcp-use";
 import { z } from "zod";
 import { readFileSync, existsSync } from "fs";
@@ -322,6 +322,11 @@ server.tool(
       to: z.string().describe("The phone number to call (e.g. +19525551234)"),
       message: z.string().describe("The message to speak to the person when they pick up"),
     }),
+    widget: {
+      name: "make-call",
+      invoking: "Placing call...",
+      invoked: "Call placed",
+    },
   },
   async ({ to, message }) => {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -356,11 +361,15 @@ server.tool(
     }
 
     const call = await res.json();
-    return object({
-      status: "Call initiated",
-      callSid: call.sid,
-      to: call.to,
-      from: call.from,
+    return widget({
+      props: {
+        status: "Call initiated",
+        callSid: call.sid,
+        to: call.to,
+        from: call.from,
+        message,
+      },
+      output: text(`Call initiated to ${call.to} from ${call.from}. Call SID: ${call.sid}`),
     });
   }
 );
@@ -376,6 +385,11 @@ server.tool(
       to: z.string().describe("The phone number to send the SMS to (e.g. +19525551234)"),
       message: z.string().describe("The text message to send"),
     }),
+    widget: {
+      name: "send-sms",
+      invoking: "Sending message...",
+      invoked: "Message sent",
+    },
   },
   async ({ to, message }) => {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -408,11 +422,15 @@ server.tool(
     }
 
     const sms = await res.json();
-    return object({
-      status: "SMS sent",
-      messageSid: sms.sid,
-      to: sms.to,
-      from: sms.from,
+    return widget({
+      props: {
+        status: "SMS sent",
+        messageSid: sms.sid,
+        to: sms.to,
+        from: sms.from,
+        body: message,
+      },
+      output: text(`SMS sent to ${sms.to} from ${sms.from}. Message SID: ${sms.sid}`),
     });
   }
 );
