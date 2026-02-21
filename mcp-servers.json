@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "google": {
+      "command": "uvx",
+      "args": ["--from", "google-workspace-mcp", "google-workspace-worker", "--tools", "gmail", "drive", "calendar", "docs", "sheets"],
+      "env": {
+        "GOOGLE_OAUTH_CLIENT_ID": "${GOOGLE_OAUTH_CLIENT_ID}",
+        "GOOGLE_OAUTH_CLIENT_SECRET": "${GOOGLE_OAUTH_CLIENT_SECRET}"
+      }
+    }
+  }
+}

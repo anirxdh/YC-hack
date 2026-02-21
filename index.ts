@@ -1,7 +1,12 @@
 import { MCPServer, object, text, error, completable, oauthWorkOSProvider } from "mcp-use/server";
+import { MCPClient } from "mcp-use";
 import { z } from "zod";
+import { readFileSync, existsSync } from "fs";
+import { resolve } from "path";
 
-// Create MCP server instance
+// ============================================
+// Server Setup
+// ============================================
 const server = new MCPServer({
   name: "mcp-orchestrator",
   title: "MCP Orchestrator",
@@ -22,7 +27,186 @@ const server = new MCPServer({
 });
 
 // ============================================
-// Tool 1: Greet someone
+// Orchestrator: Connect to backend MCP servers
+// ============================================
+
+// Track connected backends for the status resource
+const connectedBackends: { name: string; toolCount: number }[] = [];
+
+/**
+ * Convert a JSON Schema property to a Zod type.
+ * Handles string, number, integer, boolean, array, enum.
+ * Falls back to z.any() for complex/unknown types.
+ */
+function jsonSchemaPropertyToZod(prop: any): z.ZodType {
+  if (!prop) return z.any();
+
+  // Handle enums
+  if (prop.enum && Array.isArray(prop.enum) && prop.enum.length > 0) {
+    return z.enum(prop.enum as [string, ...string[]]);
+  }
+
+  switch (prop.type) {
+    case "string":
+      return z.string();
+    case "number":
+    case "integer":
+      return z.number();
+    case "boolean":
+      return z.boolean();
+    case "array":
+      return z.array(z.any());
+    case "object":
+      // Nested object — don't recurse deeply, just accept any object
+      return z.record(z.string(), z.any());
+    default:
+      return z.any();
+  }
+}
+
+/**
+ * Convert a full JSON Schema (tool inputSchema) to a Zod object schema.
+ * Preserves property descriptions and required/optional status.
+ */
+function jsonSchemaToZod(inputSchema: any): z.ZodObject<any> {
+  if (!inputSchema || !inputSchema.properties) {
+    return z.object({});
+  }
+
+  const shape: Record<string, z.ZodType> = {};
+  const required: string[] = inputSchema.required || [];
+
+  for (const [key, prop] of Object.entries(inputSchema.properties as Record<string, any>)) {
+    let field = jsonSchemaPropertyToZod(prop);
+
+    // Add description if present
+    if (prop.description) {
+      field = field.describe(prop.description);
+    }
+
+    // Mark optional if not in required array
+    if (!required.includes(key)) {
+      field = field.optional();
+    }
+
+    shape[key] = field;
+  }
+
+  return z.object(shape);
+}
+
+/**
+ * Convert a backend CallToolResult into an mcp-use server response.
+ */
+function formatBackendResult(result: any) {
+  if (result.isError) {
+    const msg = result.content?.[0]?.text || "Tool execution failed";
+    return error(msg);
+  }
+
+  const textParts = result.content
+    ?.filter((c: any) => c.type === "text")
+    .map((c: any) => c.text);
+
+  if (textParts && textParts.length > 0) {
+    const combined = textParts.join("\n");
+    // Try parsing as JSON for structured responses
+    try {
+      return object(JSON.parse(combined));
+    } catch {
+      return text(combined);
+    }
+  }
+
+  return text("Tool executed successfully (no output)");
+}
+
+/**
+ * Replace ${ENV_VAR} patterns in config with actual env values.
+ * Keeps secrets out of mcp-servers.json.
+ */
+function interpolateEnvVars(obj: any): any {
+  if (typeof obj === "string") {
+    return obj.replace(/\$\{(\w+)\}/g, (_, key) => process.env[key] || "");
+  }
+  if (Array.isArray(obj)) return obj.map(interpolateEnvVars);
+  if (obj && typeof obj === "object") {
+    return Object.fromEntries(
+      Object.entries(obj).map(([k, v]) => [k, interpolateEnvVars(v)])
+    );
+  }
+  return obj;
+}
+
+/**
+ * Load mcp-servers.json, connect to each backend, discover tools,
+ * and register them on our server with namespaced names.
+ */
+async function connectBackendServers() {
+  const configPath = resolve(process.cwd(), "mcp-servers.json");
+
+  if (!existsSync(configPath)) {
+    console.log("[orchestrator] No mcp-servers.json found — skipping backend connections");
+    return;
+  }
+
+  const configRaw = readFileSync(configPath, "utf-8");
+  const config = interpolateEnvVars(JSON.parse(configRaw));
+
+  // Check if there are any servers configured
+  const serverNames = Object.keys(config.mcpServers || {});
+  if (serverNames.length === 0) {
+    console.log("[orchestrator] mcp-servers.json is empty — no backend servers to connect");
+    return;
+  }
+
+  console.log(`[orchestrator] Connecting to ${serverNames.length} backend server(s): ${serverNames.join(", ")}`);
+
+  const client = MCPClient.fromDict(config);
+
+  for (const serverName of serverNames) {
+    try {
+      console.log(`[orchestrator] Connecting to "${serverName}"...`);
+      const session = await client.createSession(serverName);
+      const tools = await session.listTools();
+
+      console.log(`[orchestrator] "${serverName}" has ${tools.length} tool(s): ${tools.map(t => t.name).join(", ")}`);
+
+      // Register each backend tool on our server with a namespace prefix
+      for (const tool of tools) {
+        const namespacedName = `${serverName}__${tool.name}`;
+
+        server.tool(
+          {
+            name: namespacedName,
+            description: `[${serverName}] ${tool.description || tool.name}`,
+            schema: jsonSchemaToZod(tool.inputSchema),
+          },
+          async (args: any) => {
+            try {
+              const result = await session.callTool(tool.name, args);
+              return formatBackendResult(result);
+            } catch (err: any) {
+              return error(`Failed to call ${serverName}/${tool.name}: ${err.message}`);
+            }
+          }
+        );
+      }
+
+      connectedBackends.push({ name: serverName, toolCount: tools.length });
+      console.log(`[orchestrator] ✓ "${serverName}" registered (${tools.length} tools)`);
+    } catch (err: any) {
+      // Don't crash if one backend fails — log and continue
+      console.error(`[orchestrator] ✗ Failed to connect to "${serverName}": ${err.message}`);
+    }
+  }
+
+  const totalTools = connectedBackends.reduce((sum, b) => sum + b.toolCount, 0);
+  console.log(`[orchestrator] Done. ${connectedBackends.length}/${serverNames.length} backends connected, ${totalTools} tools registered.`);
+}
+
+// ============================================
+// Local Tool 1: Greet someone
 // ============================================
 server.tool(
   {
@@ -39,7 +223,7 @@ server.tool(
 );
 
 // ============================================
-// Tool 2: Get current date and time
+// Local Tool 2: Get current date and time
 // ============================================
 server.tool(
   {
@@ -58,7 +242,7 @@ server.tool(
 );
 
 // ============================================
-// Tool 3: Calculator
+// Local Tool 3: Calculator
 // ============================================
 server.tool(
   {
@@ -93,7 +277,7 @@ server.tool(
 );
 
 // ============================================
-// Tool 4: Fetch weather (mock data for now)
+// Local Tool 4: Fetch weather (mock data)
 // ============================================
 const mockWeather: Record<string, { temp: number; conditions: string }> = {
   "New York": { temp: 22, conditions: "Partly Cloudy" },
@@ -128,7 +312,7 @@ server.tool(
 );
 
 // ============================================
-// Resource: Server config and status
+// Resource: Server config and status (dynamic)
 // ============================================
 server.resource(
   {
@@ -143,7 +327,8 @@ server.resource(
       name: "MCP Orchestrator",
       version: "1.0.0",
       status: "running",
-      connectedServers: 0, // Will increase in Phase 4
+      connectedServers: connectedBackends.length,
+      backends: connectedBackends,
     })
 );
 
@@ -187,6 +372,10 @@ server.prompt(
   }
 );
 
-// Start the server
+// ============================================
+// Start: Connect backends, then listen
+// ============================================
+await connectBackendServers();
+
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 server.listen(PORT);
