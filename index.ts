@@ -308,6 +308,33 @@ server.tool(
 );
 
 // ============================================
+// Local Tool: Wake up Lark — shows the full UI
+// ============================================
+server.tool(
+  {
+    name: "wake-up-lark",
+    description: "Wake up the Lark AI communication suite. Shows a full phone-like interface where the user can make calls, open camera, send messages, play music, and more — all from the UI. Use this when the user says 'wake up lark', 'open lark', 'start lark', or wants to use the Lark interface.",
+    schema: z.object({
+      greeting: z.string().optional().describe("Optional greeting message to show the user"),
+    }),
+    widget: {
+      name: "lark",
+      invoking: "Waking up Lark...",
+      invoked: "Lark is ready",
+    },
+  },
+  async ({ greeting }) => {
+    return widget({
+      props: {
+        status: "active",
+        greeting: greeting || "Lark is awake!",
+      },
+      output: text("Lark is awake! The user can now use the phone interface to make calls, open camera, send messages, and more. The interface is interactive — the user can click icons directly to use tools."),
+    });
+  }
+);
+
+// ============================================
 // Local Tool 4: Make a phone call via Twilio
 // Accepts a phone number OR a contact name
 // ============================================
@@ -375,76 +402,6 @@ server.tool(
         message,
       },
       output: text(`Call initiated to ${contactLabel} from ${call.from}. Call SID: ${call.sid}`),
-    });
-  }
-);
-
-// ============================================
-// Local Tool 5: Send SMS via Twilio
-// Accepts a phone number OR a contact name
-// ============================================
-server.tool(
-  {
-    name: "send-sms",
-    description: "Send an SMS text message to someone using Twilio. You can pass a phone number OR a contact name (e.g. 'Anirudh').",
-    schema: z.object({
-      to: z.string().describe("Phone number (e.g. +19525551234) OR contact name (e.g. 'Anirudh')"),
-      message: z.string().describe("The text message to send"),
-    }),
-    widget: {
-      name: "send-sms",
-      invoking: "Sending message...",
-      invoked: "Message sent",
-    },
-  },
-  async ({ to, message }) => {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const fromNumber = process.env.TWILIO_PHONE_NUMBER;
-
-    if (!accountSid || !authToken || !fromNumber) {
-      return error("Twilio credentials not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env");
-    }
-
-    // Resolve contact name to phone number
-    const resolved = resolvePhoneNumber(to);
-    if (!resolved) {
-      return error(`Contact "${to}" not found. Use add-contact to save them first, or provide a phone number directly.`);
-    }
-    const phoneNumber = resolved.phone;
-    const contactLabel = resolved.name ? `${resolved.name} (${resolved.phone})` : resolved.phone;
-
-    const res = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64"),
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          To: phoneNumber,
-          From: fromNumber,
-          Body: message,
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      const err = await res.text();
-      return error(`Twilio SMS failed: ${err}`);
-    }
-
-    const sms = await res.json();
-    return widget({
-      props: {
-        status: "SMS sent",
-        messageSid: sms.sid,
-        to: contactLabel,
-        from: sms.from,
-        body: message,
-      },
-      output: text(`SMS sent to ${contactLabel} from ${sms.from}. Message SID: ${sms.sid}`),
     });
   }
 );
