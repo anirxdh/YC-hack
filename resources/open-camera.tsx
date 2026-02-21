@@ -37,14 +37,6 @@ function FlipIcon({ size = 20, color = "currentColor" }: { size?: number; color?
   );
 }
 
-function CaptureIcon({ size = 28, color = "currentColor" }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
-      <circle cx="12" cy="12" r="10" />
-    </svg>
-  );
-}
-
 function RetakeIcon({ size = 18, color = "currentColor" }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -110,17 +102,12 @@ function ActivatingView() {
           0%, 100% { transform: translateY(0); }
           50% { transform: translateY(-6px); }
         }
-        @keyframes cam-shutter-1 {
-          0%, 100% { transform: rotate(0deg); }
-          50% { transform: rotate(30deg); }
-        }
         @keyframes cam-lens-glow {
           0%, 100% { box-shadow: 0 0 12px rgba(6, 182, 212, 0.3); }
           50% { box-shadow: 0 0 24px rgba(6, 182, 212, 0.6); }
         }
       `}</style>
 
-      {/* Animated pulse rings */}
       <div style={{ position: "relative", marginBottom: "28px" }}>
         <div style={{
           position: "absolute",
@@ -166,7 +153,6 @@ function ActivatingView() {
         </div>
       </div>
 
-      {/* Shutter animation dots */}
       <div style={{
         display: "flex",
         alignItems: "center",
@@ -210,7 +196,7 @@ function ActivatingView() {
   );
 }
 
-// ─── Active state: Live camera + capture ─────────────────
+// ─── Active state: Camera capture (getUserMedia with file input fallback) ────
 
 function CameraActiveView({ props }: { props: Props }) {
   const theme = useWidgetTheme();
@@ -219,13 +205,13 @@ function CameraActiveView({ props }: { props: Props }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [cameraReady, setCameraReady] = useState(false);
+  const [mode, setMode] = useState<"loading" | "live" | "fallback" | "captured">("loading");
   const [captured, setCaptured] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<"user" | "environment">(
     props.camera === "rear" ? "environment" : "user"
   );
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [flashActive, setFlashActive] = useState(false);
   const [visible, setVisible] = useState(false);
 
@@ -234,13 +220,12 @@ function CameraActiveView({ props }: { props: Props }) {
     return () => clearTimeout(t);
   }, []);
 
+  // Try getUserMedia first, fall back to file input if blocked
   const startCamera = useCallback(async (facing: "user" | "environment") => {
-    // Stop any existing stream
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
     }
-    setCameraReady(false);
-    setErrorMsg(null);
+    setMode("loading");
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -252,36 +237,12 @@ function CameraActiveView({ props }: { props: Props }) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
           videoRef.current?.play();
-          setCameraReady(true);
+          setMode("live");
         };
       }
-    } catch (err: any) {
-      if (err.name === "NotAllowedError") {
-        setErrorMsg("Camera access denied. Please allow camera permissions and try again.");
-      } else if (err.name === "NotFoundError") {
-        setErrorMsg("No camera found on this device.");
-      } else if (err.name === "OverconstrainedError" && facing === "environment") {
-        // Fallback to user-facing if environment not available
-        try {
-          const fallback = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: false,
-          });
-          streamRef.current = fallback;
-          if (videoRef.current) {
-            videoRef.current.srcObject = fallback;
-            videoRef.current.onloadedmetadata = () => {
-              videoRef.current?.play();
-              setCameraReady(true);
-            };
-          }
-          setFacingMode("user");
-        } catch {
-          setErrorMsg("Could not access any camera on this device.");
-        }
-      } else {
-        setErrorMsg(`Camera error: ${err.message || "Unknown error"}`);
-      }
+    } catch {
+      // getUserMedia blocked (iframe permissions) — use file input fallback
+      setMode("fallback");
     }
   }, []);
 
@@ -296,7 +257,7 @@ function CameraActiveView({ props }: { props: Props }) {
     };
   }, [facingMode, captured, startCamera]);
 
-  const handleCapture = () => {
+  const handleCaptureLive = () => {
     if (!videoRef.current || !canvasRef.current) return;
 
     const video = videoRef.current;
@@ -309,19 +270,34 @@ function CameraActiveView({ props }: { props: Props }) {
     ctx.drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
     setCaptured(dataUrl);
+    setMode("captured");
 
-    // Flash effect
     setFlashActive(true);
     setTimeout(() => setFlashActive(false), 200);
 
-    // Stop the stream after capture
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
     }
   };
 
+  const handleFileCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setCaptured(dataUrl);
+      setMode("captured");
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleRetake = () => {
     setCaptured(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   const handleFlip = () => {
@@ -381,8 +357,18 @@ function CameraActiveView({ props }: { props: Props }) {
         }
       `}</style>
 
-      {/* Hidden canvas for capture */}
+      {/* Hidden canvas for live capture */}
       <canvas ref={canvasRef} style={{ display: "none" }} />
+
+      {/* Hidden file input for fallback capture */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture={facingMode === "user" ? "user" : "environment"}
+        onChange={handleFileCapture}
+        style={{ display: "none" }}
+      />
 
       {/* Header */}
       <div style={{
@@ -414,7 +400,7 @@ function CameraActiveView({ props }: { props: Props }) {
             margin: 0,
             letterSpacing: "-0.02em",
           }}>
-            {captured ? "Photo Captured" : "Camera Active"}
+            {mode === "captured" ? "Photo Captured" : "Camera Active"}
           </h2>
           {props.reason && (
             <p style={{
@@ -428,8 +414,8 @@ function CameraActiveView({ props }: { props: Props }) {
           )}
         </div>
 
-        {/* Live indicator */}
-        {!captured && cameraReady && (
+        {/* Live indicator (only in getUserMedia mode) */}
+        {mode === "live" && (
           <div style={{
             marginLeft: "auto",
             display: "flex",
@@ -469,7 +455,7 @@ function CameraActiveView({ props }: { props: Props }) {
         overflow: "hidden",
         position: "relative",
         background: isDark ? "#111827" : "#e2e8f0",
-        border: `2px solid ${captured ? accentBorder : (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)")}`,
+        border: `2px solid ${mode === "captured" ? accentBorder : (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)")}`,
         marginBottom: "16px",
       }}>
         {/* Flash overlay */}
@@ -483,44 +469,8 @@ function CameraActiveView({ props }: { props: Props }) {
           }} />
         )}
 
-        {/* Error state */}
-        {errorMsg && (
-          <div style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "24px",
-            textAlign: "center",
-          }}>
-            <div style={{
-              width: "56px",
-              height: "56px",
-              borderRadius: "50%",
-              background: isDark ? "rgba(239, 68, 68, 0.15)" : "rgba(239, 68, 68, 0.1)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              marginBottom: "12px",
-            }}>
-              <CameraIcon size={24} color="#ef4444" />
-            </div>
-            <p style={{
-              fontSize: "13px",
-              color: isDark ? "#fca5a5" : "#dc2626",
-              fontWeight: 500,
-              margin: 0,
-              lineHeight: 1.5,
-            }}>
-              {errorMsg}
-            </p>
-          </div>
-        )}
-
         {/* Loading shimmer */}
-        {!cameraReady && !errorMsg && !captured && (
+        {mode === "loading" && (
           <div style={{
             position: "absolute",
             inset: 0,
@@ -532,8 +482,62 @@ function CameraActiveView({ props }: { props: Props }) {
           }} />
         )}
 
-        {/* Video feed */}
-        {!captured && (
+        {/* Fallback mode: tap to open camera */}
+        {mode === "fallback" && (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "24px",
+              textAlign: "center",
+              cursor: "pointer",
+              transition: "background 0.2s ease",
+            }}
+          >
+            <div style={{
+              width: "72px",
+              height: "72px",
+              borderRadius: "50%",
+              background: isDark
+                ? "linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)"
+                : "linear-gradient(135deg, #22d3ee 0%, #06b6d4 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: "16px",
+              boxShadow: isDark
+                ? "0 0 30px rgba(6, 182, 212, 0.3)"
+                : "0 0 20px rgba(6, 182, 212, 0.2)",
+            }}>
+              <CameraIcon size={32} color="white" />
+            </div>
+            <p style={{
+              fontSize: "16px",
+              fontWeight: 700,
+              color: valueColor,
+              margin: "0 0 6px",
+            }}>
+              Tap to Open Camera
+            </p>
+            <p style={{
+              fontSize: "12px",
+              color: labelColor,
+              margin: 0,
+              fontWeight: 500,
+              lineHeight: 1.4,
+            }}>
+              Opens your device camera to take a photo
+            </p>
+          </div>
+        )}
+
+        {/* Live video feed (getUserMedia mode) */}
+        {(mode === "live" || mode === "loading") && (
           <video
             ref={videoRef}
             autoPlay
@@ -544,13 +548,13 @@ function CameraActiveView({ props }: { props: Props }) {
               height: "100%",
               objectFit: "cover",
               transform: facingMode === "user" ? "scaleX(-1)" : "none",
-              display: cameraReady ? "block" : "none",
+              display: mode === "live" ? "block" : "none",
             }}
           />
         )}
 
         {/* Captured photo */}
-        {captured && (
+        {mode === "captured" && captured && (
           <img
             src={captured}
             alt="Captured photo"
@@ -558,13 +562,12 @@ function CameraActiveView({ props }: { props: Props }) {
               width: "100%",
               height: "100%",
               objectFit: "cover",
-              transform: facingMode === "user" ? "scaleX(-1)" : "none",
             }}
           />
         )}
 
-        {/* Corner viewfinder marks */}
-        {!captured && cameraReady && (
+        {/* Corner viewfinder marks (live mode only) */}
+        {mode === "live" && (
           <>
             {[
               { top: "12px", left: "12px", borderTop: true, borderLeft: true },
@@ -594,7 +597,7 @@ function CameraActiveView({ props }: { props: Props }) {
       </div>
 
       {/* Controls */}
-      {!captured ? (
+      {mode === "live" ? (
         <div style={{
           display: "flex",
           alignItems: "center",
@@ -602,10 +605,8 @@ function CameraActiveView({ props }: { props: Props }) {
           gap: "20px",
           width: "100%",
         }}>
-          {/* Flip camera button */}
           <button
             onClick={handleFlip}
-            disabled={!cameraReady}
             style={{
               width: "44px",
               height: "44px",
@@ -615,18 +616,15 @@ function CameraActiveView({ props }: { props: Props }) {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              cursor: cameraReady ? "pointer" : "not-allowed",
-              opacity: cameraReady ? 1 : 0.4,
+              cursor: "pointer",
               transition: "all 0.15s ease",
             }}
           >
             <FlipIcon size={18} color={isDark ? "#94a3b8" : "#64748b"} />
           </button>
 
-          {/* Capture button */}
           <button
-            onClick={handleCapture}
-            disabled={!cameraReady}
+            onClick={handleCaptureLive}
             style={{
               width: "64px",
               height: "64px",
@@ -636,8 +634,7 @@ function CameraActiveView({ props }: { props: Props }) {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              cursor: cameraReady ? "pointer" : "not-allowed",
-              opacity: cameraReady ? 1 : 0.4,
+              cursor: "pointer",
               transition: "all 0.15s ease",
               padding: 0,
             }}
@@ -651,17 +648,80 @@ function CameraActiveView({ props }: { props: Props }) {
             }} />
           </button>
 
-          {/* Spacer for alignment */}
           <div style={{ width: "44px", height: "44px" }} />
         </div>
-      ) : (
+      ) : mode === "fallback" ? (
         <div style={{
           display: "flex",
           alignItems: "center",
           gap: "12px",
           width: "100%",
         }}>
-          {/* Retake button */}
+          <button
+            onClick={() => {
+              setFacingMode("user");
+              setTimeout(() => fileInputRef.current?.click(), 50);
+            }}
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+              padding: "14px 20px",
+              borderRadius: "12px",
+              border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`,
+              background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+              cursor: "pointer",
+              fontSize: "14px",
+              fontWeight: 600,
+              color: isDark ? "#e2e8f0" : "#1e293b",
+              fontFamily: "inherit",
+              transition: "all 0.15s ease",
+            }}
+          >
+            <CameraIcon size={16} color={isDark ? "#94a3b8" : "#64748b"} />
+            Selfie
+          </button>
+          <button
+            onClick={() => {
+              setFacingMode("environment");
+              setTimeout(() => fileInputRef.current?.click(), 50);
+            }}
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+              padding: "14px 20px",
+              borderRadius: "12px",
+              border: "none",
+              background: isDark
+                ? "linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)"
+                : "linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)",
+              cursor: "pointer",
+              fontSize: "14px",
+              fontWeight: 600,
+              color: "white",
+              fontFamily: "inherit",
+              boxShadow: isDark
+                ? "0 4px 16px rgba(6, 182, 212, 0.3)"
+                : "0 4px 12px rgba(6, 182, 212, 0.25)",
+              transition: "all 0.15s ease",
+            }}
+          >
+            <CameraIcon size={16} color="white" />
+            Take Photo
+          </button>
+        </div>
+      ) : mode === "captured" ? (
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "12px",
+          width: "100%",
+        }}>
           <button
             onClick={handleRetake}
             style={{
@@ -686,7 +746,6 @@ function CameraActiveView({ props }: { props: Props }) {
             Retake
           </button>
 
-          {/* Download button */}
           <button
             onClick={handleDownload}
             style={{
@@ -716,7 +775,7 @@ function CameraActiveView({ props }: { props: Props }) {
             Save Photo
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* Status badge */}
       <div style={{
@@ -734,7 +793,7 @@ function CameraActiveView({ props }: { props: Props }) {
           height: "7px",
           borderRadius: "50%",
           background: accentColor,
-          animation: captured ? "none" : "cam-live-dot 2s ease-in-out infinite",
+          animation: mode === "captured" ? "none" : "cam-live-dot 2s ease-in-out infinite",
           boxShadow: `0 0 6px ${isDark ? "rgba(34, 211, 238, 0.5)" : "rgba(6, 182, 212, 0.5)"}`,
         }} />
         <CameraIcon size={14} color={accentColor} />
@@ -744,7 +803,7 @@ function CameraActiveView({ props }: { props: Props }) {
           fontWeight: 700,
           letterSpacing: "0.02em",
         }}>
-          {captured ? "Photo ready" : (cameraReady ? "Camera active" : "Initializing...")}
+          {mode === "captured" ? "Photo ready" : mode === "live" ? "Camera active" : mode === "fallback" ? "Ready to capture" : "Initializing..."}
         </span>
       </div>
     </div>
