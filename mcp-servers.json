@@ -1,12 +1,8 @@
 {
   "mcpServers": {
-    "google": {
-      "command": "uvx",
-      "args": ["--from", "google-workspace-mcp", "google-workspace-worker", "--tools", "gmail", "drive", "calendar", "docs", "sheets"],
-      "env": {
-        "GOOGLE_OAUTH_CLIENT_ID": "${GOOGLE_OAUTH_CLIENT_ID}",
-        "GOOGLE_OAUTH_CLIENT_SECRET": "${GOOGLE_OAUTH_CLIENT_SECRET}"
-      }
+    "twilio": {
+      "command": "npx",
+      "args": ["-y", "@twilio-alpha/mcp", "${TWILIO_ACCOUNT_SID}/${TWILIO_API_KEY}:${TWILIO_API_SECRET}", "--services", "messaging,voice"]
     }
   }
 }
