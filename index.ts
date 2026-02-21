@@ -1,4 +1,4 @@
-import { MCPServer, object, text, error, completable } from "mcp-use/server";
+import { MCPServer, object, text, error, completable, oauthWorkOSProvider } from "mcp-use/server";
 import { z } from "zod";
 
 // Create MCP server instance
@@ -9,6 +9,7 @@ const server = new MCPServer({
   description:
     "A custom MCP orchestrator that aggregates multiple MCP servers into one unified gateway",
   baseUrl: process.env.MCP_URL || "http://localhost:3000",
+  oauth: oauthWorkOSProvider(),
   favicon: "favicon.ico",
   websiteUrl: "https://mcp-use.com",
   icons: [
