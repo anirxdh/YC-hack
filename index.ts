@@ -436,6 +436,44 @@ server.tool(
 );
 
 // ============================================
+// Local Tool 7: Open camera for photo capture
+// ============================================
+server.tool(
+  {
+    name: "open-camera",
+    description: "Open the user's camera to capture a photo. Works on desktop (webcam) and mobile (front/rear camera). Use this when the user wants to take a photo, scan something, or show something via their camera.",
+    schema: z.object({
+      camera: z
+        .enum(["front", "rear"])
+        .optional()
+        .describe("Which camera to use: 'front' for selfie camera, 'rear' for back camera. Defaults to front."),
+      reason: z
+        .string()
+        .optional()
+        .describe("Brief reason for opening the camera, shown to the user (e.g. 'Take a profile photo')"),
+    }),
+    widget: {
+      name: "open-camera",
+      invoking: "Activating camera...",
+      invoked: "Camera ready",
+    },
+  },
+  async ({ camera, reason }) => {
+    const selectedCamera = camera || "front";
+    const displayReason = reason || "Photo capture";
+
+    return widget({
+      props: {
+        status: "Camera activated",
+        camera: selectedCamera,
+        reason: displayReason,
+      },
+      output: text(`Camera opened (${selectedCamera} facing). ${displayReason}`),
+    });
+  }
+);
+
+// ============================================
 // Resource: Server config and status (dynamic)
 // ============================================
 server.resource(
