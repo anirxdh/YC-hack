@@ -242,42 +242,157 @@ function FaceTimePanel() {
 
 function MusicPanel() {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"idle" | "calling" | "done">("idle");
+  const [status, setStatus] = useState<"idle" | "calling" | "done" | "error">("idle");
+  const [controlLoading, setControlLoading] = useState<string | null>(null);
   const [result, setResult] = useState("");
-  const execute = () => {
+
+  const { callTool } = useWidget<Props>();
+
+  const execute = async () => {
     if (!query.trim()) return;
     setStatus("calling");
     setResult("");
-    setTimeout(() => { setResult(`Now playing: "${query}"`); setStatus("done"); }, 1500);
+    try {
+      const res = await callTool("youtube__play", { query });
+      setResult(res?.result || `Now playing: "${query}"`);
+      setStatus("done");
+    } catch (err: any) {
+      setResult(err?.message || "Playback failed");
+      setStatus("error");
+    }
   };
+
+  const control = async (tool: string, label: string) => {
+    setControlLoading(label);
+    try {
+      const res = await callTool(`youtube__${tool}`, {});
+      setResult(res?.result || `${label} done`);
+      setStatus("done");
+    } catch (err: any) {
+      setResult(err?.message || `${label} failed`);
+      setStatus("error");
+    }
+    setControlLoading(null);
+  };
+
+  const controlBtnStyle = (loading: boolean): React.CSSProperties => ({
+    flex: 1,
+    padding: "8px 0",
+    borderRadius: "10px",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontSize: "14px",
+    border: "none",
+    cursor: loading ? "default" : "pointer",
+    opacity: loading ? 0.4 : 0.7,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "inherit",
+    transition: "opacity 0.15s",
+  });
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && execute()} placeholder="Song, artist, or mood…" style={inputStyle} />
       <button onClick={execute} disabled={!query.trim() || status === "calling"} style={btnStyle("#e11d48", !query.trim() || status === "calling")}>
         {status === "calling" ? <div style={spinnerStyle} /> : "Play"}
       </button>
-      {result && <div style={resultStyle("#e11d48")}><p style={{ color: "#fb7185", fontSize: "12px", margin: 0 }}>{result}</p></div>}
+      {/* Transport controls */}
+      <div style={{ display: "flex", gap: "6px" }}>
+        <button onClick={() => control("previous-track", "Prev")} disabled={!!controlLoading} style={controlBtnStyle(controlLoading === "Prev")}>
+          {controlLoading === "Prev" ? <div style={{ ...spinnerStyle, width: "10px", height: "10px" }} /> : "⏮"}
+        </button>
+        <button onClick={() => control("pause-resume", "Pause")} disabled={!!controlLoading} style={controlBtnStyle(controlLoading === "Pause")}>
+          {controlLoading === "Pause" ? <div style={{ ...spinnerStyle, width: "10px", height: "10px" }} /> : "⏯"}
+        </button>
+        <button onClick={() => control("next-track", "Next")} disabled={!!controlLoading} style={controlBtnStyle(controlLoading === "Next")}>
+          {controlLoading === "Next" ? <div style={{ ...spinnerStyle, width: "10px", height: "10px" }} /> : "⏭"}
+        </button>
+        <button onClick={() => control("now-playing", "Now")} disabled={!!controlLoading} style={controlBtnStyle(controlLoading === "Now")}>
+          {controlLoading === "Now" ? <div style={{ ...spinnerStyle, width: "10px", height: "10px" }} /> : "🎵"}
+        </button>
+      </div>
+      {result && <div style={resultStyle(status === "error" ? "#ef4444" : "#e11d48")}><p style={{ color: status === "error" ? "#f87171" : "#fb7185", fontSize: "11px", margin: 0, lineHeight: 1.4 }}>{result}</p></div>}
     </div>
   );
 }
 
 function VideoPanel() {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"idle" | "calling" | "done">("idle");
+  const [status, setStatus] = useState<"idle" | "calling" | "done" | "error">("idle");
+  const [action, setAction] = useState<"search" | "play">("search");
   const [result, setResult] = useState("");
-  const execute = () => {
+
+  const { callTool } = useWidget<Props>();
+
+  const search = async () => {
+    if (!query.trim()) return;
+    setStatus("calling");
+    setAction("search");
+    setResult("");
+    try {
+      const res = await callTool("youtube__search", { query });
+      setResult(res?.result || `Results for: "${query}"`);
+      setStatus("done");
+    } catch (err: any) {
+      setResult(err?.message || "Search failed");
+      setStatus("error");
+    }
+  };
+
+  const play = async () => {
+    if (!query.trim()) return;
+    setStatus("calling");
+    setAction("play");
+    setResult("");
+    try {
+      const res = await callTool("youtube__play", { query });
+      setResult(res?.result || `Playing: "${query}"`);
+      setStatus("done");
+    } catch (err: any) {
+      setResult(err?.message || "Playback failed");
+      setStatus("error");
+    }
+  };
+
+  const addToQueue = async () => {
     if (!query.trim()) return;
     setStatus("calling");
     setResult("");
-    setTimeout(() => { setResult(`Streaming: "${query}"`); setStatus("done"); }, 1500);
+    try {
+      const res = await callTool("youtube__add-to-queue", { query });
+      setResult(res?.result || `Added to queue: "${query}"`);
+      setStatus("done");
+    } catch (err: any) {
+      setResult(err?.message || "Queue failed");
+      setStatus("error");
+    }
   };
+
+  const isDisabled = !query.trim() || status === "calling";
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-      <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && execute()} placeholder="Search YouTube…" style={inputStyle} />
-      <button onClick={execute} disabled={!query.trim() || status === "calling"} style={btnStyle("#dc2626", !query.trim() || status === "calling")}>
-        {status === "calling" ? <div style={spinnerStyle} /> : "Watch"}
+    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+      <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} placeholder="Search YouTube…" style={inputStyle} />
+      <div style={{ display: "flex", gap: "6px" }}>
+        <button onClick={search} disabled={isDisabled} style={{ ...btnStyle("#dc2626", isDisabled), flex: 1 }}>
+          {status === "calling" && action === "search" ? <div style={spinnerStyle} /> : "Search"}
+        </button>
+        <button onClick={play} disabled={isDisabled} style={{ ...btnStyle("#dc2626", isDisabled), flex: 1 }}>
+          {status === "calling" && action === "play" ? <div style={spinnerStyle} /> : "Play"}
+        </button>
+      </div>
+      <button onClick={addToQueue} disabled={isDisabled} style={{
+        ...btnStyle("transparent", isDisabled),
+        border: "1px solid rgba(220,38,38,0.3)",
+        color: "#f87171",
+        fontSize: "11px",
+        padding: "7px 0",
+      }}>
+        {status === "calling" && action !== "search" && action !== "play" ? <div style={spinnerStyle} /> : "+ Queue"}
       </button>
-      {result && <div style={resultStyle("#dc2626")}><p style={{ color: "#f87171", fontSize: "12px", margin: 0 }}>{result}</p></div>}
+      {result && <div style={resultStyle(status === "error" ? "#ef4444" : "#dc2626")}><p style={{ color: status === "error" ? "#f87171" : "#f87171", fontSize: "11px", margin: 0, lineHeight: 1.4 }}>{result}</p></div>}
     </div>
   );
 }

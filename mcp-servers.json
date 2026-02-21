@@ -1,3 +1,7 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "youtube": {
+      "url": "https://young-surf-xt5j8.run.mcp-use.com/mcp"
+    }
+  }
 }
