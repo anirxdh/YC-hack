@@ -1,0 +1,29 @@
+{
+  "name": "agent-chat-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP server for agent-to-agent messaging",
+  "scripts": {
+    "build": "mcp-use build",
+    "dev": "mcp-use dev --no-hmr",
+    "start": "mcp-use start",
+    "deploy": "mcp-use deploy"
+  },
+  "dependencies": {
+    "@mcp-ui/server": "^6.1.0",
+    "mcp-use": "latest",
+    "zod": "4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwindcss": "^4.2.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}
