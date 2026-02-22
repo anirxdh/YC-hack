@@ -1159,32 +1159,26 @@ function VideoPanel() {
     }
   };
 
-  // Now playing view
+  // Now playing view — embedded YouTube player
   if (playing) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         <div style={{
           position: "relative", borderRadius: "12px", overflow: "hidden",
-          background: "#0a0a0f", border: "1px solid rgba(255,255,255,0.06)",
+          background: "#000", border: "1px solid rgba(255,255,255,0.06)",
         }}>
-          <img
-            src={`https://i.ytimg.com/vi/${playing.videoId}/hqdefault.jpg`}
-            alt=""
-            style={{ width: "100%", aspectRatio: "16/9", objectFit: "cover", display: "block", opacity: 0.85 }}
+          <iframe
+            src={`https://www.youtube.com/embed/${playing.videoId}?autoplay=1&rel=0&modestbranding=1`}
+            title={playing.title}
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+            style={{
+              width: "100%",
+              aspectRatio: "16/9",
+              border: "none",
+              display: "block",
+            }}
           />
-          {/* Play overlay */}
-          <div style={{
-            position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
-            background: "rgba(0,0,0,0.3)",
-          }}>
-            <div style={{
-              width: "40px", height: "40px", borderRadius: "50%",
-              background: "rgba(255,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: "0 2px 12px rgba(255,0,0,0.4)",
-            }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
-            </div>
-          </div>
         </div>
         <div style={{ textAlign: "center" }}>
           <p style={{ color: "#fff", fontSize: "12px", fontWeight: 600, margin: 0 }}>{playing.title}</p>
@@ -1681,7 +1675,7 @@ function AppRing({ onSelect, active }: { onSelect: (t: ActiveTool) => void; acti
               <span style={{
                 fontSize: "9px",
                 fontWeight: 500,
-                color: isSelected ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)",
+                color: isSelected ? "#ffffff" : "rgba(255,255,255,0.85)",
                 transition: "color 0.3s",
               }}>
                 {app.label}
@@ -1812,7 +1806,7 @@ function LarkApp() {
               position: showClock ? "absolute" : "relative",
               pointerEvents: showClock ? "none" : "auto",
             }}>
-              <img src={`${window.location.origin}/lark-logo.png`} alt="Lark" style={{ width: "64px", height: "64px", objectFit: "contain" }} />
+              <span style={{ fontSize: "48px", lineHeight: 1 }}>🐥</span>
             </div>
             {/* Clock */}
             <div style={{
@@ -1958,7 +1952,7 @@ export default function LarkWidget() {
           justifyContent: "center",
           fontFamily: "'Inter', 'SF Pro Display', -apple-system, system-ui, sans-serif",
         }}>
-          <img src={`${window.location.origin}/lark-logo.png`} alt="Lark" style={{ width: "72px", height: "72px", objectFit: "contain", animation: "lark-pulse 1.5s ease-in-out infinite" }} />
+          <span style={{ fontSize: "56px", lineHeight: 1, animation: "lark-pulse 1.5s ease-in-out infinite" }}>🐥</span>
           <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "13px", marginTop: "16px", fontWeight: 400, letterSpacing: "0.05em" }}>
             Waking up Lark…
           </p>
