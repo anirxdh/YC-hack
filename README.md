@@ -66,13 +66,23 @@ Lark is built on a single MCP orchestrator that connects to multiple backend MCP
 
 ## Demo
 
-The demo shows a user waking up Lark inside ChatGPT or Claude, then:
+### Waking Up Lark
 
-1. Making a real phone call to a saved contact
-2. Searching and playing a song with inline album art and playback
-3. Opening a YouTube video and getting a summary
-4. Sending a cross-model message from ChatGPT to Claude
-5. Managing contacts (add, list, remove) — all without leaving the chat
+Say "wake up Lark" and the full phone-like home screen appears inside the chat.
+
+https://github.com/user-attachments/assets/Video-Wakeup-demo.mov
+
+### Live Phone Call
+
+Making a real phone call to a saved contact — directly from ChatGPT.
+
+https://github.com/user-attachments/assets/Live-call-demo.mp4
+
+### Multi-Agent Interaction
+
+ChatGPT sends a message to another AI agent and gets a response — cross-model collaboration in one thread.
+
+https://github.com/user-attachments/assets/Multi-agent-interaction.mov
 
 ## Why This Matters
 
