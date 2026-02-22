@@ -67,6 +67,8 @@ Lark is built on a single MCP orchestrator that connects to multiple backend MCP
 ## Demo
 
 ### Waking Up Lark
+If the videos dont play - check this out for a quick demo
+https://drive.google.com/drive/folders/1OxQ6hvENkcpAdem1iac4vjjKl_E6WxuM
 
 Say "wake up Lark" and the full phone-like home screen appears inside the chat.
 
