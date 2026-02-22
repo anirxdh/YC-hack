@@ -546,6 +546,211 @@ server.tool(
 );
 
 // ============================================
+// Music: Audius + Deezer search helpers
+// ============================================
+
+interface AudiusTrack {
+  id: string;
+  title: string;
+  artist: string;
+  duration: number;
+  artworkUrl: string;
+}
+
+async function searchAudius(query: string): Promise<AudiusTrack[]> {
+  try {
+    const res = await fetch(
+      `https://api.audius.co/v1/tracks/search?query=${encodeURIComponent(query)}&limit=5`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    const data = await res.json();
+    if (!data.data) return [];
+    return data.data
+      .filter((t: any) => t.id && t.duration > 0)
+      .map((t: any) => ({
+        id: t.id,
+        title: t.title || "Unknown",
+        artist: t.user?.name || "",
+        duration: t.duration,
+        artworkUrl: t.artwork?.["480x480"] || t.artwork?.["150x150"] || "",
+      }));
+  } catch {
+    return [];
+  }
+}
+
+interface DeezerTrack {
+  title: string;
+  artist: string;
+  album: string;
+  previewUrl: string;
+  coverUrl: string;
+  duration: number;
+}
+
+async function searchDeezer(query: string): Promise<DeezerTrack[]> {
+  try {
+    const res = await fetch(
+      `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=5`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+    const data = await res.json();
+    if (!data.data) return [];
+    return data.data.map((t: any) => ({
+      title: t.title,
+      artist: t.artist?.name || "",
+      album: t.album?.title || "",
+      previewUrl: t.preview,
+      coverUrl: t.album?.cover_big || t.album?.cover_medium || "",
+      duration: t.duration,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ============================================
+// Music: Audio stream proxy (Audius → same-origin)
+// ============================================
+
+server.get("/stream/:trackId", async (c) => {
+  const trackId = c.req.param("trackId");
+  const streamUrl = `https://api.audius.co/v1/tracks/${trackId}/stream`;
+
+  const reqHeaders: Record<string, string> = { "User-Agent": "LarkMCP/1.0" };
+  const range = c.req.header("Range");
+  if (range) reqHeaders["Range"] = range;
+
+  try {
+    const audioRes = await fetch(streamUrl, { headers: reqHeaders, redirect: "follow" });
+    if (!audioRes.ok && audioRes.status !== 206) {
+      return c.text("Stream not available", 404);
+    }
+    const respHeaders: Record<string, string> = {
+      "Content-Type": audioRes.headers.get("Content-Type") || "audio/mpeg",
+      "Access-Control-Allow-Origin": "*",
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "public, max-age=600",
+    };
+    const cl = audioRes.headers.get("Content-Length");
+    if (cl) respHeaders["Content-Length"] = cl;
+    const cr = audioRes.headers.get("Content-Range");
+    if (cr) respHeaders["Content-Range"] = cr;
+
+    return new Response(audioRes.body, { status: audioRes.status, headers: respHeaders });
+  } catch {
+    return c.text("Stream error", 502);
+  }
+});
+
+// ============================================
+// Music: Cover image proxy (same-origin for CSP)
+// ============================================
+
+server.get("/cover", async (c) => {
+  const url = c.req.query("url");
+  if (!url) return c.text("Missing url", 400);
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return c.text("Not found", 404);
+    return new Response(res.body, {
+      headers: {
+        "Content-Type": res.headers.get("Content-Type") || "image/jpeg",
+        "Cache-Control": "public, max-age=3600",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  } catch {
+    return c.text("Failed", 502);
+  }
+});
+
+// ============================================
+// Local Tool: Music play — search + return structured data
+// ============================================
+server.tool(
+  {
+    name: "music-play",
+    description:
+      "Search and play a song by name. Returns structured track data (title, artist, album art, stream URL) for inline playback in the Lark widget.",
+    schema: z.object({
+      query: z.string().describe("Song name, artist, or keywords"),
+    }),
+  },
+  async ({ query }) => {
+    const [audiusResults, deezerResults] = await Promise.all([
+      searchAudius(query),
+      searchDeezer(query),
+    ]);
+
+    const audius = audiusResults[0];
+    const deezer = deezerResults[0];
+
+    if (!audius && !deezer) {
+      return error(`No results found for "${query}"`);
+    }
+
+    return object({
+      title: deezer?.title || audius?.title || query,
+      artist: deezer?.artist || audius?.artist || "",
+      album: deezer?.album || "",
+      coverUrl: deezer?.coverUrl || audius?.artworkUrl || "",
+      audiusTrackId: audius?.id || "",
+      previewUrl: deezer?.previewUrl || "",
+      duration: audius?.duration || deezer?.duration || 0,
+      isFullTrack: !!audius,
+    });
+  }
+);
+
+// ============================================
+// Local Tool: Music search — return structured results list
+// ============================================
+server.tool(
+  {
+    name: "music-search",
+    description:
+      "Search for songs across Audius and Deezer. Returns a list of results with title, artist, and source.",
+    schema: z.object({
+      query: z.string().describe("Song name, artist, or keywords"),
+    }),
+  },
+  async ({ query }) => {
+    const [audiusResults, deezerResults] = await Promise.all([
+      searchAudius(query),
+      searchDeezer(query),
+    ]);
+
+    if (audiusResults.length === 0 && deezerResults.length === 0) {
+      return error(`No results found for "${query}"`);
+    }
+
+    const fmt = (s: number) =>
+      Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+
+    return object({
+      results: [
+        ...audiusResults.slice(0, 3).map((r) => ({
+          title: r.title,
+          artist: r.artist,
+          duration: fmt(r.duration),
+          source: "audius",
+          fullTrack: true,
+        })),
+        ...deezerResults.slice(0, 3).map((r) => ({
+          title: r.title,
+          artist: r.artist,
+          album: r.album,
+          duration: fmt(r.duration),
+          source: "deezer",
+          fullTrack: false,
+        })),
+      ],
+    });
+  }
+);
+
+// ============================================
 // Resource: Server config and status (dynamic)
 // ============================================
 server.resource(

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import AppRing from "./components/AppRing";
 
-export type ActiveTool = "phone" | "facetime" | "music" | "video" | "camera" | "messages" | null;
+export type ActiveTool = "phone" | "facetime" | "music" | "video" | "camera" | "messages" | "chat" | null;
 
 function useLiveClock() {
   const [now, setNow] = useState(new Date());
