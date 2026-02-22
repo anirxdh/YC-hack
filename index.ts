@@ -313,7 +313,7 @@ server.tool(
 server.tool(
   {
     name: "wake-up-lark",
-    description: "Wake up the Lark AI communication suite. Shows a full phone-like interface where the user can make calls, open camera, send messages, play music, and more — all from the UI. Use this when the user says 'wake up lark', 'open lark', 'start lark', or wants to use the Lark interface.",
+    description: "Wake up the Lark AI communication suite. Shows a full phone-like interface where the user can make calls, send messages, play music, and more — all from the UI. Use this when the user says 'wake up lark', 'open lark', 'start lark', or wants to use the Lark interface.",
     schema: z.object({
       greeting: z.string().optional().describe("Optional greeting message to show the user"),
     }),
@@ -329,7 +329,7 @@ server.tool(
         status: "active",
         greeting: greeting || "Lark is awake!",
       },
-      output: text("Lark is awake! The user can now use the phone interface to make calls, open camera, send messages, and more. The interface is interactive — the user can click icons directly to use tools."),
+      output: text("Lark is awake! The user can now use the phone interface to make calls, send messages, play music, and more. The interface is interactive — the user can click icons directly to use tools."),
     });
   }
 );
@@ -406,43 +406,6 @@ server.tool(
   }
 );
 
-// ============================================
-// Local Tool 7: Open camera for photo capture
-// ============================================
-server.tool(
-  {
-    name: "open-camera",
-    description: "Open the user's camera to capture a photo. Works on desktop (webcam) and mobile (front/rear camera). Use this when the user wants to take a photo, scan something, or show something via their camera.",
-    schema: z.object({
-      camera: z
-        .enum(["front", "rear"])
-        .optional()
-        .describe("Which camera to use: 'front' for selfie camera, 'rear' for back camera. Defaults to front."),
-      reason: z
-        .string()
-        .optional()
-        .describe("Brief reason for opening the camera, shown to the user (e.g. 'Take a profile photo')"),
-    }),
-    widget: {
-      name: "open-camera",
-      invoking: "Activating camera...",
-      invoked: "Camera ready",
-    },
-  },
-  async ({ camera, reason }) => {
-    const selectedCamera = camera || "front";
-    const displayReason = reason || "Photo capture";
-
-    return widget({
-      props: {
-        status: "Camera activated",
-        camera: selectedCamera,
-        reason: displayReason,
-      },
-      output: text(`Camera opened (${selectedCamera} facing). ${displayReason}`),
-    });
-  }
-);
 
 // ============================================
 // Local Tool 8: Group call — call multiple people simultaneously

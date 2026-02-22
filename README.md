@@ -106,7 +106,27 @@ Lark uses OAuth to securely connect to ChatGPT and Claude. When adding Lark as a
 
 ![Lark OAuth setup in ChatGPT](public/readme-oauth.png)
 
-## Getting Started
+## Repos
+
+Lark is composed of multiple MCP servers coordinated by a single orchestrator:
+
+| App | Repo |
+|---|---|
+| YouTube / Video | [rashmi-star/video-yt](https://github.com/rashmi-star/video-yt) |
+| Music | [rashmi-star/music-mcp](https://github.com/rashmi-star/music-mcp) |
+| Cross-model Messages | [rashmi-star/message-agent](https://github.com/rashmi-star/message-agent) |
+
+## Try It Live
+
+Connect Lark to ChatGPT or Claude using the hosted MCP server URL:
+
+```
+https://odd-dust-kiili.run.mcp-use.com/mcp
+```
+
+Add this as a custom MCP app (with OAuth authentication) — no local setup required.
+
+## Getting Started (Local Development)
 
 ```bash
 npm install

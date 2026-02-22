@@ -10,7 +10,7 @@ const propSchema = z.object({
 });
 
 export const widgetMetadata: WidgetMetadata = {
-  description: "Lark AI Communication Suite — phone, camera, messages, and more",
+  description: "Lark AI Communication Suite — phone, music, messages, and more",
   props: propSchema,
   metadata: {
     autoResize: true,
@@ -24,7 +24,7 @@ export const widgetMetadata: WidgetMetadata = {
 };
 
 type Props = z.infer<typeof propSchema>;
-type ActiveTool = "phone" | "groupcall" | "music" | "video" | "camera" | "messages" | "contacts" | null;
+type ActiveTool = "phone" | "groupcall" | "music" | "video" | "messages" | "contacts" | null;
 
 // ─── Shared styles ───────────────────────────────────────
 
@@ -109,12 +109,6 @@ const icons = {
       <path d="M12 3v10.55A4 4 0 1014 17V7h4V3h-6z" />
     </svg>
   ),
-  camera: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20, color: "white" }}>
-      <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
-      <circle cx="12" cy="13" r="4" />
-    </svg>
-  ),
   video: (
     <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 20, height: 20, color: "white" }}>
       <path d="M23.5 6.19a3.02 3.02 0 00-2.12-2.14C19.54 3.5 12 3.5 12 3.5s-7.54 0-9.38.55A3.02 3.02 0 00.5 6.19 31.68 31.68 0 000 12a31.68 31.68 0 00.5 5.81 3.02 3.02 0 002.12 2.14c1.84.55 9.38.55 9.38.55s7.54 0 9.38-.55a3.02 3.02 0 002.12-2.14A31.68 31.68 0 0024 12a31.68 31.68 0 00-.5-5.81zM9.75 15.02V8.98L15.5 12l-5.75 3.02z" />
@@ -136,7 +130,6 @@ const apps: { id: ActiveTool; label: string; gradient: string; icon: React.React
   { id: "phone", label: "Phone", gradient: "linear-gradient(to bottom, #62d84e, #2eb83a)", icon: icons.phone },
   { id: "groupcall", label: "Group Call", gradient: "linear-gradient(to bottom, #3b82f6, #1d4ed8)", icon: icons.groupcall },
   { id: "music", label: "Music", gradient: "linear-gradient(to bottom, #fc5c7d, #e6233b)", icon: icons.music },
-  { id: "camera", label: "Camera", gradient: "linear-gradient(to bottom, #6b7280, #374151)", icon: icons.camera },
   { id: "video", label: "YouTube", gradient: "linear-gradient(to bottom, #ff0000, #cc0000)", icon: icons.video },
   { id: "messages", label: "Messages", gradient: "linear-gradient(to bottom, #a855f7, #7c3aed)", icon: icons.messages },
   { id: "contacts", label: "Contacts", gradient: "linear-gradient(to bottom, #f59e0b, #d97706)", icon: icons.contacts },
@@ -306,46 +299,6 @@ function PhonePanel() {
   );
 }
 
-function CameraPanel() {
-  const [reason, setReason] = useState("");
-  const [status, setStatus] = useState<"idle" | "calling" | "done" | "error">("idle");
-  const [result, setResult] = useState("");
-
-  const { callTool } = useWidget<Props>();
-
-  const execute = async () => {
-    setStatus("calling");
-    setResult("");
-    try {
-      const res = await callTool("open-camera", { camera: "front", reason: reason || "Photo capture from Lark" });
-      setResult(res?.result || "Camera activated");
-      setStatus("done");
-    } catch (err: any) {
-      setResult(err?.message || "Camera failed");
-      setStatus("error");
-    }
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-      <input
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && execute()}
-        placeholder="Reason (optional)…"
-        style={inputStyle}
-      />
-      <button onClick={execute} disabled={status === "calling"} style={btnStyle("#6b7280", status === "calling")}>
-        {status === "calling" ? <div style={spinnerStyle} /> : "Capture"}
-      </button>
-      {result && (
-        <div style={resultStyle(status === "error" ? "#ef4444" : "#6b7280")}>
-          <p style={{ color: status === "error" ? "#f87171" : "#9ca3af", fontSize: "12px", margin: 0 }}>{result}</p>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function GroupCallPanel() {
   const [contacts, setContacts] = useState<{ name: string; phone: string }[]>([]);
@@ -1696,7 +1649,6 @@ function ActivePanel({ tool }: { tool: ActiveTool }) {
   const panelMap: Record<string, React.ReactNode> = {
     phone: <PhonePanel />,
     groupcall: <GroupCallPanel />,
-    camera: <CameraPanel />,
     music: <MusicPanel />,
     video: <VideoPanel />,
     messages: <MessagesPanel />,
