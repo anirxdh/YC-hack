@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { McpUseProvider, useWidget, type WidgetMetadata } from "mcp-use/react";
 import { z } from "zod";
 
@@ -147,25 +147,142 @@ const apps: { id: ActiveTool; label: string; gradient: string; icon: React.React
 function PhonePanel() {
   const [number, setNumber] = useState("");
   const [message, setMessage] = useState("Hello, this is a call from Lark.");
-  const [status, setStatus] = useState<"idle" | "calling" | "done" | "error">("idle");
-  const [result, setResult] = useState("");
+  const [status, setStatus] = useState<"idle" | "ringing" | "connected" | "ended" | "error">("idle");
+  const [contactLabel, setContactLabel] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { callTool } = useWidget<Props>();
 
   const execute = async () => {
     if (!number.trim()) return;
-    setStatus("calling");
-    setResult("");
+    setStatus("ringing");
+    setContactLabel(number.trim());
+    setErrorMsg("");
     try {
       const res = await callTool("make-call", { to: number, message });
-      setResult(res?.result || "Call initiated");
-      setStatus("done");
-    } catch (err: any) {
-      setResult(err?.message || "Call failed");
+      // Parse the result to extract the contact label
+      let data: any;
+      try { data = typeof res?.result === "object" ? res.result : JSON.parse(res?.result || "{}"); } catch { data = null; }
+      if (data?.to) setContactLabel(data.to);
+      else if (typeof res?.result === "string") {
+        const match = res.result.match(/to\s+(.+?)\s+from/i);
+        if (match) setContactLabel(match[1]);
+      }
+      setStatus("connected");
+      // Simulate call duration then end
+      timerRef.current = setTimeout(() => setStatus("ended"), 8000);
+    } catch {
+      setErrorMsg("Couldn\u2019t place the call. Please try again.");
       setStatus("error");
     }
   };
 
+  const hangUp = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setStatus("ended");
+  };
+
+  const reset = () => {
+    setStatus("idle");
+    setContactLabel("");
+    setErrorMsg("");
+  };
+
+  useEffect(() => {
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, []);
+
+  // Active call screen (ringing / connected / ended)
+  if (status === "ringing" || status === "connected" || status === "ended") {
+    const isRinging = status === "ringing";
+    const isConnected = status === "connected";
+    const isEnded = status === "ended";
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", padding: "8px 0" }}>
+        {/* Avatar */}
+        <div style={{
+          width: "56px", height: "56px", borderRadius: "50%",
+          background: isEnded ? "rgba(255,255,255,0.06)" : "linear-gradient(135deg, #22c55e, #16a34a)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: isRinging ? "0 0 0 8px rgba(34,197,94,0.15), 0 0 0 16px rgba(34,197,94,0.06)" : "none",
+          animation: isRinging ? "lark-pulse 1.5s ease-in-out infinite" : "none",
+          transition: "all 0.3s ease",
+        }}>
+          <span style={{ fontSize: "20px", fontWeight: 700, color: "white" }}>
+            {contactLabel.charAt(0).toUpperCase()}
+          </span>
+        </div>
+
+        {/* Contact name */}
+        <p style={{ color: "white", fontSize: "14px", fontWeight: 600, margin: 0, textAlign: "center", maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {contactLabel}
+        </p>
+
+        {/* Status text */}
+        <p style={{
+          color: isEnded ? "rgba(255,255,255,0.3)" : isConnected ? "#4ade80" : "rgba(255,255,255,0.5)",
+          fontSize: "11px", fontWeight: 500, margin: 0, letterSpacing: "0.03em",
+        }}>
+          {isRinging ? "Ringing\u2026" : isConnected ? "Connected" : "Call ended"}
+        </p>
+
+        {/* Duration / timer dots */}
+        {isConnected && (
+          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+            <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#22c55e", animation: "lark-pulse 1s ease-in-out infinite" }} />
+            <span style={{ color: "rgba(255,255,255,0.35)", fontSize: "10px", fontWeight: 500 }}>Live</span>
+          </div>
+        )}
+
+        {/* Message being spoken */}
+        {(isRinging || isConnected) && (
+          <div style={{ padding: "6px 10px", borderRadius: "8px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", width: "100%" }}>
+            <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "9px", fontWeight: 500, margin: 0, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Speaking</p>
+            <p style={{ color: "rgba(255,255,255,0.55)", fontSize: "11px", margin: "3px 0 0", lineHeight: 1.4 }}>{message}</p>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        {isEnded ? (
+          <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+            <button onClick={execute} style={{ ...btnStyle("#22c55e", false), flex: 1 }}>Call Again</button>
+            <button onClick={reset} style={{ ...btnStyle("rgba(255,255,255,0.08)", false), flex: 1, color: "rgba(255,255,255,0.5)" }}>New Call</button>
+          </div>
+        ) : (
+          <button onClick={hangUp} style={{
+            width: "48px", height: "48px", borderRadius: "50%",
+            background: "#ef4444", border: "none", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 4px 16px rgba(239,68,68,0.3)",
+            transition: "transform 0.1s",
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+              <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.956.956 0 010-1.36C3.46 8.77 7.48 7 12 7s8.54 1.77 11.71 4.72c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.1-.7-.28-.79-.73-1.68-1.36-2.66-1.85a.993.993 0 01-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
+            </svg>
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // Error state
+  if (status === "error") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", padding: "8px 0" }}>
+        <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: "rgba(239,68,68,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="#f87171"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        </div>
+        <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "12px", margin: 0, textAlign: "center" }}>{errorMsg}</p>
+        <button onClick={reset} style={btnStyle("rgba(255,255,255,0.08)", false)}>
+          <span style={{ color: "rgba(255,255,255,0.5)" }}>Try Again</span>
+        </button>
+      </div>
+    );
+  }
+
+  // Idle — input form
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
       <input
@@ -175,20 +292,16 @@ function PhonePanel() {
         placeholder="+1 (555) 000-0000"
         style={inputStyle}
       />
-      <input
+      <textarea
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        placeholder="Message to speak…"
-        style={{ ...inputStyle, fontSize: "12px" }}
+        placeholder="Message to speak\u2026"
+        rows={3}
+        style={{ ...textareaStyle }}
       />
-      <button onClick={execute} disabled={!number.trim() || status === "calling"} style={btnStyle("#22c55e", !number.trim() || status === "calling")}>
-        {status === "calling" ? <div style={spinnerStyle} /> : "Call"}
+      <button onClick={execute} disabled={!number.trim()} style={btnStyle("#22c55e", !number.trim())}>
+        Call
       </button>
-      {result && (
-        <div style={resultStyle(status === "error" ? "#ef4444" : "#22c55e")}>
-          <p style={{ color: status === "error" ? "#f87171" : "#4ade80", fontSize: "12px", margin: 0 }}>{result}</p>
-        </div>
-      )}
     </div>
   );
 }
@@ -239,7 +352,8 @@ function GroupCallPanel() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("Hello from Lark group call!");
   const [status, setStatus] = useState<"idle" | "loading" | "calling" | "done" | "error">("idle");
-  const [result, setResult] = useState("");
+  const [callResults, setCallResults] = useState<{ label: string; ok: boolean }[]>([]);
+  const [errorMsg, setErrorMsg] = useState("");
   const { callTool } = useWidget<Props>();
 
   // Load contacts on mount
@@ -270,28 +384,136 @@ function GroupCallPanel() {
   const callAll = async () => {
     if (selected.size === 0 || !message.trim()) return;
     setStatus("calling");
-    setResult("");
+    setCallResults([]);
+    setErrorMsg("");
     try {
       const names = Array.from(selected);
       const res = await callTool("group-call", { to: names, message });
       let data: any;
       try { data = typeof res?.result === "object" ? res.result : JSON.parse(res?.result || "{}"); } catch { data = null; }
-      if (data?.summary) {
-        setResult(data.summary);
-      } else {
-        setResult(res?.result || `Called ${names.length} contacts`);
+      const results: { label: string; ok: boolean }[] = [];
+      if (data?.calls) {
+        for (const c of data.calls) results.push({ label: c.label || c.name || "Unknown", ok: true });
       }
+      if (data?.errors) {
+        for (const e of data.errors) results.push({ label: e.label || "Unknown", ok: false });
+      }
+      if (results.length === 0) {
+        // Fallback: mark all selected as succeeded
+        for (const n of names) results.push({ label: n, ok: true });
+      }
+      setCallResults(results);
       setStatus("done");
-    } catch (err: any) {
-      setResult(err?.message || "Group call failed");
+    } catch {
+      setErrorMsg("Couldn\u2019t place the calls. Please try again.");
       setStatus("error");
     }
+  };
+
+  const reset = () => {
+    setStatus("idle");
+    setSelected(new Set());
+    setCallResults([]);
+    setErrorMsg("");
   };
 
   if (status === "loading") {
     return <div style={{ display: "flex", justifyContent: "center", padding: "20px" }}><div style={spinnerStyle} /></div>;
   }
 
+  // Calling state — show ringing indicators
+  if (status === "calling") {
+    const names = Array.from(selected);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "14px", padding: "8px 0" }}>
+        <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "11px", fontWeight: 500, margin: 0, letterSpacing: "0.03em" }}>
+          Calling {names.length} {names.length === 1 ? "person" : "people"}\u2026
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "100%" }}>
+          {names.map((n) => (
+            <div key={n} style={{
+              padding: "8px 10px", borderRadius: "10px",
+              background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)",
+              display: "flex", alignItems: "center", gap: "8px",
+            }}>
+              <div style={{ ...spinnerStyle, width: "12px", height: "12px", borderWidth: "1.5px", borderColor: "rgba(96,165,250,0.3)", borderTopColor: "#60a5fa" }} />
+              <span style={{ color: "white", fontSize: "11px", fontWeight: 500 }}>{n}</span>
+              <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "9px", marginLeft: "auto" }}>Ringing</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Done state — show per-contact results
+  if (status === "done") {
+    const succeeded = callResults.filter((r) => r.ok).length;
+    const total = callResults.length;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", padding: "8px 0" }}>
+        {/* Summary icon */}
+        <div style={{
+          width: "48px", height: "48px", borderRadius: "50%",
+          background: succeeded === total ? "rgba(34,197,94,0.12)" : "rgba(251,191,36,0.12)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          {succeeded === total ? (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="#4ade80"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+          ) : (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="#fbbf24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+          )}
+        </div>
+        <p style={{ color: "white", fontSize: "13px", fontWeight: 600, margin: 0 }}>
+          {succeeded === total ? "All calls placed" : `${succeeded}/${total} calls placed`}
+        </p>
+
+        {/* Per-contact status */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "3px", width: "100%" }}>
+          {callResults.map((r, i) => (
+            <div key={i} style={{
+              padding: "7px 10px", borderRadius: "10px",
+              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
+              display: "flex", alignItems: "center", gap: "8px",
+            }}>
+              {r.ok ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#4ade80"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#f87171"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              )}
+              <span style={{ color: "white", fontSize: "11px", fontWeight: 500, flex: 1 }}>{r.label}</span>
+              <span style={{ color: r.ok ? "#4ade80" : "#f87171", fontSize: "9px", fontWeight: 600 }}>
+                {r.ok ? "Connected" : "Failed"}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+          <button onClick={callAll} style={{ ...btnStyle("#3b82f6", false), flex: 1 }}>Call Again</button>
+          <button onClick={reset} style={{ ...btnStyle("rgba(255,255,255,0.08)", false), flex: 1, color: "rgba(255,255,255,0.5)" }}>New Call</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (status === "error") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", padding: "8px 0" }}>
+        <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "rgba(239,68,68,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="#f87171"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        </div>
+        <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "12px", margin: 0, textAlign: "center" }}>{errorMsg}</p>
+        <button onClick={reset} style={btnStyle("rgba(255,255,255,0.08)", false)}>
+          <span style={{ color: "rgba(255,255,255,0.5)" }}>Try Again</span>
+        </button>
+      </div>
+    );
+  }
+
+  // Idle — selection screen
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "10px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" as const, margin: 0, textAlign: "center" }}>
@@ -315,7 +537,6 @@ function GroupCallPanel() {
                 transition: "all 0.15s",
               }}
             >
-              {/* Checkbox */}
               <div style={{
                 width: "16px", height: "16px", borderRadius: "4px", flexShrink: 0,
                 background: selected.has(c.name) ? "#3b82f6" : "rgba(255,255,255,0.08)",
@@ -339,23 +560,17 @@ function GroupCallPanel() {
       <input
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        placeholder="Message to speak…"
+        placeholder="Message to speak\u2026"
         style={{ ...inputStyle, fontSize: "12px" }}
       />
 
       <button
         onClick={callAll}
-        disabled={selected.size === 0 || !message.trim() || status === "calling"}
-        style={btnStyle("#3b82f6", selected.size === 0 || !message.trim() || status === "calling")}
+        disabled={selected.size === 0 || !message.trim()}
+        style={btnStyle("#3b82f6", selected.size === 0 || !message.trim())}
       >
-        {status === "calling" ? <div style={spinnerStyle} /> : `Call ${selected.size > 0 ? selected.size : ""} Selected`}
+        {`Call ${selected.size > 0 ? selected.size : ""} Selected`}
       </button>
-
-      {result && (
-        <div style={resultStyle(status === "error" ? "#ef4444" : "#3b82f6")}>
-          <p style={{ color: status === "error" ? "#f87171" : "#60a5fa", fontSize: "11px", margin: 0, whiteSpace: "pre-line" }}>{result}</p>
-        </div>
-      )}
     </div>
   );
 }
@@ -383,6 +598,167 @@ function parseTrackResult(res: any): TrackData | null {
   return data as TrackData;
 }
 
+// ─── Audio Visualizer ────────────────────────────────────
+
+function Visualizer({ analyser, playing }: { analyser: AnalyserNode | null; playing: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef<number>(0);
+  const timeRef = useRef(0);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const W = 252;
+    const H = 130;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.scale(dpr, dpr);
+
+    let freqData: Uint8Array<ArrayBuffer>;
+    let waveData: Uint8Array<ArrayBuffer>;
+    if (analyser) {
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.82;
+      freqData = new Uint8Array(analyser.frequencyBinCount) as Uint8Array<ArrayBuffer>;
+      waveData = new Uint8Array(analyser.frequencyBinCount) as Uint8Array<ArrayBuffer>;
+    } else {
+      freqData = new Uint8Array(256) as Uint8Array<ArrayBuffer>;
+      waveData = new Uint8Array(256) as Uint8Array<ArrayBuffer>;
+    }
+
+    const draw = () => {
+      rafRef.current = requestAnimationFrame(draw);
+      timeRef.current += 0.016;
+      const t = timeRef.current;
+      ctx.clearRect(0, 0, W, H);
+
+      if (analyser && playing) {
+        analyser.getByteFrequencyData(freqData);
+        analyser.getByteTimeDomainData(waveData);
+      }
+
+      // Layer 1: Ambient glow orbs
+      const bass = playing ? (freqData[2] + freqData[3] + freqData[4]) / 3 / 255 : 0.05;
+      const mid = playing ? (freqData[20] + freqData[25] + freqData[30]) / 3 / 255 : 0.03;
+
+      const grad1 = ctx.createRadialGradient(W * 0.25, H * 0.6, 0, W * 0.25, H * 0.6, 55 + bass * 35);
+      grad1.addColorStop(0, `rgba(139, 92, 246, ${0.15 + bass * 0.25})`);
+      grad1.addColorStop(0.5, `rgba(139, 92, 246, ${0.05 + bass * 0.1})`);
+      grad1.addColorStop(1, "rgba(139, 92, 246, 0)");
+      ctx.fillStyle = grad1;
+      ctx.fillRect(0, 0, W, H);
+
+      const grad2 = ctx.createRadialGradient(W * 0.75, H * 0.4, 0, W * 0.75, H * 0.4, 45 + mid * 30);
+      grad2.addColorStop(0, `rgba(236, 72, 153, ${0.12 + mid * 0.2})`);
+      grad2.addColorStop(0.5, `rgba(236, 72, 153, ${0.04 + mid * 0.08})`);
+      grad2.addColorStop(1, "rgba(236, 72, 153, 0)");
+      ctx.fillStyle = grad2;
+      ctx.fillRect(0, 0, W, H);
+
+      // Layer 2: Smooth waveform
+      ctx.beginPath();
+      ctx.lineWidth = 1.5;
+      const waveGrad = ctx.createLinearGradient(0, 0, W, 0);
+      waveGrad.addColorStop(0, "rgba(139, 92, 246, 0.0)");
+      waveGrad.addColorStop(0.15, "rgba(139, 92, 246, 0.5)");
+      waveGrad.addColorStop(0.5, "rgba(168, 85, 247, 0.7)");
+      waveGrad.addColorStop(0.85, "rgba(236, 72, 153, 0.5)");
+      waveGrad.addColorStop(1, "rgba(236, 72, 153, 0.0)");
+      ctx.strokeStyle = waveGrad;
+
+      const sliceW = W / waveData.length;
+      for (let i = 0; i < waveData.length; i++) {
+        const v = playing ? waveData[i] / 128.0 : 1 + Math.sin(t * 1.5 + i * 0.04) * 0.02;
+        const y = (v * H) / 2;
+        if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * sliceW, y);
+      }
+      ctx.stroke();
+
+      // Waveform glow
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = playing ? `rgba(168, 85, 247, ${0.08 + bass * 0.12})` : "rgba(168, 85, 247, 0.03)";
+      ctx.beginPath();
+      for (let i = 0; i < waveData.length; i++) {
+        const v = playing ? waveData[i] / 128.0 : 1 + Math.sin(t * 1.5 + i * 0.04) * 0.02;
+        const y = (v * H) / 2;
+        if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * sliceW, y);
+      }
+      ctx.stroke();
+
+      // Layer 3: Frequency bars
+      const barCount = 36;
+      const totalGap = (barCount - 1) * 2;
+      const barW = (W - 20 - totalGap) / barCount;
+      const startX = 10;
+      const baseY = H - 10;
+
+      for (let i = 0; i < barCount; i++) {
+        const idx = Math.floor((i / barCount) * freqData.length * 0.7);
+        const raw = freqData[idx] / 255;
+        const val = playing ? Math.pow(raw, 0.85) : 0.02 + Math.sin(t * 0.8 + i * 0.15) * 0.015;
+        const barH = Math.max(2, val * (H * 0.65));
+        const x = startX + i * (barW + 2);
+
+        const barGrad = ctx.createLinearGradient(x, baseY, x, baseY - barH);
+        const hue1 = 265 + (i / barCount) * 50;
+        const hue2 = 275 + (i / barCount) * 50;
+        barGrad.addColorStop(0, `hsla(${hue1}, 70%, 60%, ${playing ? 0.6 + val * 0.4 : 0.15})`);
+        barGrad.addColorStop(0.5, `hsla(${hue2}, 75%, 65%, ${playing ? 0.5 + val * 0.5 : 0.1})`);
+        barGrad.addColorStop(1, `hsla(${hue2 + 15}, 80%, 70%, ${playing ? 0.3 + val * 0.4 : 0.06})`);
+        ctx.fillStyle = barGrad;
+
+        const r = Math.min(barW / 2, 2);
+        ctx.beginPath();
+        ctx.moveTo(x, baseY);
+        ctx.lineTo(x, baseY - barH + r);
+        ctx.quadraticCurveTo(x, baseY - barH, x + r, baseY - barH);
+        ctx.lineTo(x + barW - r, baseY - barH);
+        ctx.quadraticCurveTo(x + barW, baseY - barH, x + barW, baseY - barH + r);
+        ctx.lineTo(x + barW, baseY);
+        ctx.closePath();
+        ctx.fill();
+
+        // Cap
+        if (playing && val > 0.1) {
+          ctx.fillStyle = `hsla(${hue1}, 85%, 80%, ${0.6 + val * 0.4})`;
+          ctx.beginPath();
+          ctx.arc(x + barW / 2, baseY - barH, barW / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Reflection
+        const reflGrad = ctx.createLinearGradient(x, baseY, x, baseY + barH * 0.3);
+        reflGrad.addColorStop(0, `hsla(${hue1}, 70%, 60%, ${playing ? 0.08 + val * 0.06 : 0.02})`);
+        reflGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = reflGrad;
+        ctx.fillRect(x, baseY + 2, barW, barH * 0.25);
+      }
+
+      // Layer 4: Pulse line
+      ctx.beginPath();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${playing ? 0.06 + bass * 0.08 : 0.03})`;
+      ctx.moveTo(0, baseY);
+      ctx.lineTo(W, baseY);
+      ctx.stroke();
+    };
+
+    draw();
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [analyser, playing]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ width: "100%", height: 130, display: "block", borderRadius: "12px 12px 0 0" }}
+    />
+  );
+}
+
 // ─── Shared Player Card (full music player UI) ──────────
 
 function PlayerCard({ track, onBack }: { track: TrackData; onBack?: () => void }) {
@@ -393,6 +769,26 @@ function PlayerCard({ track, onBack }: { track: TrackData; onBack?: () => void }
   const [muted, setMuted] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const [analyserReady, setAnalyserReady] = useState(false);
+
+  const initAnalyser = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || analyserRef.current) return;
+    try {
+      const actx = new AudioContext();
+      const source = actx.createMediaElementSource(audio);
+      const analyser = actx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.82;
+      source.connect(analyser);
+      analyser.connect(actx.destination);
+      ctxRef.current = actx;
+      analyserRef.current = analyser;
+      setAnalyserReady(true);
+    } catch {}
+  }, []);
 
   // Setup audio when track changes
   useEffect(() => {
@@ -438,13 +834,22 @@ function PlayerCard({ track, onBack }: { track: TrackData; onBack?: () => void }
       audio.removeEventListener("ended", onEnd);
       audio.removeEventListener("error", onError);
       audio.src = "";
+      if (ctxRef.current) { ctxRef.current.close().catch(() => {}); ctxRef.current = null; }
+      analyserRef.current = null;
+      setAnalyserReady(false);
     };
   }, [track.audiusTrackId, track.previewUrl]);
 
   const toggle = () => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (playing) { audio.pause(); } else { audio.play().catch(() => {}); }
+    if (!analyserRef.current) initAnalyser();
+    if (playing) {
+      audio.pause();
+    } else {
+      if (ctxRef.current?.state === "suspended") ctxRef.current.resume();
+      audio.play().catch(() => {});
+    }
     setPlaying((p) => !p);
   };
 
@@ -503,34 +908,35 @@ function PlayerCard({ track, onBack }: { track: TrackData; onBack?: () => void }
         zIndex: 1, pointerEvents: "none",
       }} />
 
+      {/* Visualizer */}
+      <div style={{ position: "relative", zIndex: 2 }}>
+        <Visualizer analyser={analyserReady ? analyserRef.current : null} playing={playing} />
+      </div>
+
       {/* Content */}
-      <div style={{ position: "relative", zIndex: 2, padding: "16px 14px", display: "flex", flexDirection: "column", gap: "10px" }}>
-        {/* Album art */}
-        {coverSrc && (
-          <div style={{ display: "flex", justifyContent: "center" }}>
+      <div style={{ position: "relative", zIndex: 2, padding: "10px 14px 14px", display: "flex", flexDirection: "column", gap: "8px" }}>
+        {/* Track info row */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          {coverSrc && (
             <img
               src={coverSrc} alt=""
               style={{
-                width: "80px", height: "80px", borderRadius: "12px", objectFit: "cover",
-                boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+                width: "44px", height: "44px", borderRadius: "10px", objectFit: "cover",
+                boxShadow: "0 2px 12px rgba(0,0,0,0.4)", flexShrink: 0,
                 opacity: imgLoaded ? 1 : 0, transition: "opacity 0.5s ease",
               }}
             />
-          </div>
-        )}
-
-        {/* Track info */}
-        <div style={{ textAlign: "center" }}>
-          <p style={{ color: "#fff", fontSize: "13px", fontWeight: 650, margin: 0, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {track.title}
-          </p>
-          <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "11px", fontWeight: 420, margin: "2px 0 0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {track.artist}{track.album ? ` \u00b7 ${track.album}` : ""}
-          </p>
-          <div style={{ marginTop: "4px" }}>
+          )}
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <p style={{ color: "#fff", fontSize: "12px", fontWeight: 650, margin: 0, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {track.title}
+            </p>
+            <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "10px", fontWeight: 420, margin: "2px 0 0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {track.artist}{track.album ? ` \u00b7 ${track.album}` : ""}
+            </p>
             <span style={{
-              fontSize: "8px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" as const,
-              padding: "2px 8px", borderRadius: "20px",
+              fontSize: "7px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" as const,
+              padding: "1px 6px", borderRadius: "20px", display: "inline-block", marginTop: "3px",
               background: track.isFullTrack ? "rgba(34,197,94,0.15)" : "rgba(251,191,36,0.12)",
               color: track.isFullTrack ? "#4ade80" : "#fbbf24",
               border: `1px solid ${track.isFullTrack ? "rgba(34,197,94,0.2)" : "rgba(251,191,36,0.2)"}`,
@@ -641,10 +1047,10 @@ function MusicPanel() {
     try {
       const res = await callTool("music-play", { query });
       const data = parseTrackResult(res);
-      if (!data) { setErrorMsg("No results found"); setSearching(false); return; }
+      if (!data) { setErrorMsg("No results found — try a different search"); setSearching(false); return; }
       setTrack(data);
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Failed to play");
+    } catch {
+      setErrorMsg("Couldn\u2019t find that song. Try a different search!");
     }
     setSearching(false);
   };
@@ -659,20 +1065,56 @@ function MusicPanel() {
       <button onClick={play} disabled={!query.trim() || searching} style={btnStyle("#8b5cf6", !query.trim() || searching)}>
         {searching ? <div style={spinnerStyle} /> : "Play"}
       </button>
-      {errorMsg && <div style={resultStyle("#ef4444")}><p style={{ color: "#f87171", fontSize: "11px", margin: 0 }}>{errorMsg}</p></div>}
+      {errorMsg && (
+        <div style={{ padding: "10px 12px", borderRadius: "12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", textAlign: "center" }}>
+          <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "11px", margin: 0 }}>{errorMsg}</p>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Video Panel (search → results → click to play → full player) ──
+// ─── Video Panel (YouTube search → results → play) ──────
+
+interface VideoResult {
+  title: string;
+  channel: string;
+  duration: string;
+  views: string;
+  videoId: string;
+}
+
+function parseSearchResults(txt: string): VideoResult[] {
+  const results: VideoResult[] = [];
+  const blocks = txt.split(/\n\n/).filter(Boolean);
+  for (const block of blocks) {
+    const titleMatch = block.match(/^\d+\.\s*(.+)/);
+    if (!titleMatch) continue;
+    const channelMatch = block.match(/Channel:\s*(.+?)(?:\s*·|$)/);
+    const durationMatch = block.match(/·\s*(\d+:\d+(?::\d+)?)\s*·/);
+    const viewsMatch = block.match(/·\s*([\d.]+[KMB]?\s*views)/);
+    const urlMatch = block.match(/youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/);
+    if (urlMatch) {
+      results.push({
+        title: titleMatch[1].trim(),
+        channel: channelMatch?.[1]?.trim() || "",
+        duration: durationMatch?.[1] || "",
+        views: viewsMatch?.[1] || "",
+        videoId: urlMatch[1],
+      });
+    }
+  }
+  return results;
+}
 
 function VideoPanel() {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<any[]>([]);
-  const [track, setTrack] = useState<TrackData | null>(null);
+  const [results, setResults] = useState<VideoResult[]>([]);
+  const [playing, setPlaying] = useState<VideoResult | null>(null);
   const [loadingIdx, setLoadingIdx] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [queueMsg, setQueueMsg] = useState("");
   const { callTool } = useWidget<Props>();
 
   const search = async () => {
@@ -680,52 +1122,102 @@ function VideoPanel() {
     setSearching(true);
     setErrorMsg("");
     setResults([]);
+    setPlaying(null);
     try {
-      const res = await callTool("music-search", { query });
-      let data: any;
-      try { data = typeof res?.result === "object" ? res.result : JSON.parse(res?.result || "{}"); } catch { data = null; }
-      if (data?.results?.length) {
-        setResults(data.results);
+      const res = await callTool("video-yt__search", { query });
+      const txt = typeof res?.result === "string" ? res.result : JSON.stringify(res?.result || "");
+      const parsed = parseSearchResults(txt);
+      if (parsed.length > 0) {
+        setResults(parsed);
       } else {
         setErrorMsg("No results found");
       }
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Search failed");
+    } catch {
+      setErrorMsg("Search failed — try again");
     }
     setSearching(false);
   };
 
-  const playResult = async (r: any, idx: number) => {
+  const playVideo = async (r: VideoResult, idx: number) => {
     setLoadingIdx(idx);
     try {
-      const res = await callTool("music-play", { query: `${r.title} ${r.artist}` });
-      const data = parseTrackResult(res);
-      if (data) setTrack(data);
-      else setErrorMsg("Could not play this track");
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Playback failed");
+      await callTool("video-yt__play", { query: r.videoId });
+      setPlaying(r);
+    } catch {
+      setErrorMsg("Couldn\u2019t play this video");
     }
     setLoadingIdx(null);
   };
 
-  if (track) {
-    return <PlayerCard track={track} onBack={() => setTrack(null)} />;
+  const addToQueue = async (r: VideoResult) => {
+    setQueueMsg("");
+    try {
+      await callTool("video-yt__add-to-queue", { query: r.videoId });
+      setQueueMsg(`Queued: ${r.title}`);
+    } catch {
+      setQueueMsg("Failed to queue");
+    }
+  };
+
+  // Now playing view
+  if (playing) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        <div style={{
+          position: "relative", borderRadius: "12px", overflow: "hidden",
+          background: "#0a0a0f", border: "1px solid rgba(255,255,255,0.06)",
+        }}>
+          <img
+            src={`https://i.ytimg.com/vi/${playing.videoId}/hqdefault.jpg`}
+            alt=""
+            style={{ width: "100%", aspectRatio: "16/9", objectFit: "cover", display: "block", opacity: 0.85 }}
+          />
+          {/* Play overlay */}
+          <div style={{
+            position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.3)",
+          }}>
+            <div style={{
+              width: "40px", height: "40px", borderRadius: "50%",
+              background: "rgba(255,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: "0 2px 12px rgba(255,0,0,0.4)",
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+            </div>
+          </div>
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <p style={{ color: "#fff", fontSize: "12px", fontWeight: 600, margin: 0 }}>{playing.title}</p>
+          <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "10px", margin: "2px 0 0" }}>
+            {playing.channel} {playing.duration ? `\u00b7 ${playing.duration}` : ""}
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: "6px" }}>
+          <button onClick={() => addToQueue(playing)} style={{ ...btnStyle("rgba(255,255,255,0.08)", false), flex: 1, fontSize: "10px", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            + Queue
+          </button>
+          <button onClick={() => setPlaying(null)} style={{ ...btnStyle("rgba(255,255,255,0.08)", false), flex: 1, fontSize: "10px", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            Back
+          </button>
+        </div>
+        {queueMsg && <div style={resultStyle("#dc2626")}><p style={{ color: "#f87171", fontSize: "10px", margin: 0 }}>{queueMsg}</p></div>}
+      </div>
+    );
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-      <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} placeholder="Search songs..." style={inputStyle} />
+      <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} placeholder="Search YouTube..." style={inputStyle} />
       <button onClick={search} disabled={!query.trim() || searching} style={btnStyle("#dc2626", !query.trim() || searching)}>
         {searching ? <div style={spinnerStyle} /> : "Search"}
       </button>
 
-      {/* Results list */}
       {results.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: "180px", overflowY: "auto" }}>
           {results.map((r, i) => (
             <button
               key={i}
-              onClick={() => playResult(r, i)}
+              onClick={() => playVideo(r, i)}
               disabled={loadingIdx !== null}
               style={{
                 padding: "8px 10px", borderRadius: "10px",
@@ -738,36 +1230,31 @@ function VideoPanel() {
                 transition: "opacity 0.15s, background 0.15s",
               }}
             >
-              {/* Play icon / spinner */}
-              <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(220,38,38,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                {loadingIdx === i ? (
-                  <div style={{ ...spinnerStyle, width: "10px", height: "10px", borderWidth: "1.5px" }} />
-                ) : (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="#f87171"><path d="M8 5v14l11-7z"/></svg>
-                )}
+              <div style={{
+                width: "40px", height: "28px", borderRadius: "4px", overflow: "hidden", flexShrink: 0,
+                background: "#111",
+              }}>
+                <img src={`https://i.ytimg.com/vi/${r.videoId}/default.jpg`} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <p style={{ color: "white", fontSize: "11px", fontWeight: 500, margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <p style={{ color: "white", fontSize: "10px", fontWeight: 500, margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {r.title}
                 </p>
-                <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "9px", margin: 0 }}>
-                  {r.artist} {r.duration ? `\u00b7 ${r.duration}` : ""}
+                <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "8px", margin: "1px 0 0" }}>
+                  {r.channel} {r.duration ? `\u00b7 ${r.duration}` : ""} {r.views ? `\u00b7 ${r.views}` : ""}
                 </p>
               </div>
-              <span style={{
-                fontSize: "7px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" as const,
-                padding: "2px 5px", borderRadius: "6px", flexShrink: 0,
-                background: r.fullTrack ? "rgba(34,197,94,0.15)" : "rgba(251,191,36,0.12)",
-                color: r.fullTrack ? "#4ade80" : "#fbbf24",
-              }}>
-                {r.fullTrack ? "Full" : "30s"}
-              </span>
+              {loadingIdx === i && <div style={{ ...spinnerStyle, width: "10px", height: "10px", borderWidth: "1.5px", flexShrink: 0 }} />}
             </button>
           ))}
         </div>
       )}
 
-      {errorMsg && <div style={resultStyle("#ef4444")}><p style={{ color: "#f87171", fontSize: "11px", margin: 0 }}>{errorMsg}</p></div>}
+      {errorMsg && (
+        <div style={{ padding: "10px 12px", borderRadius: "12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", textAlign: "center" }}>
+          <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "11px", margin: 0 }}>{errorMsg}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1228,7 +1715,7 @@ function ActivePanel({ tool }: { tool: ActiveTool }) {
       left: "calc(50% + 100px)",
       top: "50%",
       transform: "translateY(-50%)",
-      width: "220px",
+      width: "280px",
       padding: "16px",
       borderRadius: "20px",
       background: "rgba(255,255,255,0.04)",
@@ -1325,7 +1812,7 @@ function LarkApp() {
               position: showClock ? "absolute" : "relative",
               pointerEvents: showClock ? "none" : "auto",
             }}>
-              <span style={{ fontSize: "56px", lineHeight: 1 }}>🐥</span>
+              <img src={`${window.location.origin}/lark-logo.png`} alt="Lark" style={{ width: "64px", height: "64px", objectFit: "contain" }} />
             </div>
             {/* Clock */}
             <div style={{
@@ -1405,9 +1892,9 @@ function GlobalStyles() {
         50% { opacity: 0.5; }
       }
 
-      /* Hide placeholder color for dark inputs */
+      /* Placeholder color for dark inputs */
       input::placeholder, textarea::placeholder {
-        color: rgba(255,255,255,0.15) !important;
+        color: rgba(255,255,255,0.35) !important;
       }
       input:focus, textarea:focus {
         box-shadow: 0 0 0 1px rgba(255,255,255,0.1);
@@ -1471,8 +1958,8 @@ export default function LarkWidget() {
           justifyContent: "center",
           fontFamily: "'Inter', 'SF Pro Display', -apple-system, system-ui, sans-serif",
         }}>
-          <span style={{ fontSize: "64px", lineHeight: 1, animation: "lark-pulse 1.5s ease-in-out infinite" }}>🐥</span>
-          <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "13px", marginTop: "16px", fontWeight: 300, letterSpacing: "0.05em" }}>
+          <img src={`${window.location.origin}/lark-logo.png`} alt="Lark" style={{ width: "72px", height: "72px", objectFit: "contain", animation: "lark-pulse 1.5s ease-in-out infinite" }} />
+          <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "13px", marginTop: "16px", fontWeight: 400, letterSpacing: "0.05em" }}>
             Waking up Lark…
           </p>
         </div>
