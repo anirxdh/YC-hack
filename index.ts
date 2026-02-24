@@ -1,4 +1,4 @@
-import { MCPServer, object, text, error, widget, completable, oauthWorkOSProvider } from "mcp-use/server";
+import { MCPServer, object, text, error, widget, completable } from "mcp-use/server";
 import { MCPClient } from "mcp-use";
 import { z } from "zod";
 import { readFileSync, writeFileSync, existsSync } from "fs";
@@ -39,16 +39,107 @@ function resolvePhoneNumber(nameOrNumber: string): { name: string | null; phone:
 }
 
 // ============================================
+// User MCP Server Registry (JSON store)
+// ============================================
+const REGISTRY_PATH = resolve(process.cwd(), "user-servers.json");
+
+interface RegisteredServer {
+  url: string;
+  addedAt: string;
+  tools: string[];
+}
+
+interface ServerRegistry {
+  servers: Record<string, RegisteredServer>;
+}
+
+function loadRegistry(): ServerRegistry {
+  try {
+    if (existsSync(REGISTRY_PATH)) {
+      return JSON.parse(readFileSync(REGISTRY_PATH, "utf-8"));
+    }
+  } catch {}
+  return { servers: {} };
+}
+
+function saveRegistry(registry: ServerRegistry) {
+  writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2), "utf-8");
+}
+
+// Live sessions for dynamically registered servers (keyed by server name)
+const liveSessions: Map<string, { session: any; toolNames: string[] }> = new Map();
+
+// Set of server names that have been removed (tools stay registered but calls are blocked)
+const removedServers: Set<string> = new Set();
+
+/**
+ * Connect to a single MCP server by URL, discover its tools,
+ * register them on the orchestrator, persist to user-servers.json,
+ * and store the live session for proxying.
+ */
+async function connectAndRegisterServer(name: string, url: string): Promise<string[]> {
+  const config = { mcpServers: { [name]: { url } } };
+  const client = MCPClient.fromDict(config);
+
+  console.log(`[registry] Connecting to "${name}" at ${url}...`);
+  const session = await client.createSession(name);
+  const tools = await session.listTools();
+
+  console.log(`[registry] "${name}" has ${tools.length} tool(s): ${tools.map((t: any) => t.name).join(", ")}`);
+
+  const registeredToolNames: string[] = [];
+
+  for (const tool of tools) {
+    const namespacedName = `${name}__${tool.name}`;
+    registeredToolNames.push(namespacedName);
+
+    server.tool(
+      {
+        name: namespacedName,
+        description: `[${name}] ${tool.description || tool.name}`,
+        schema: jsonSchemaToZod(tool.inputSchema),
+      },
+      async (args: any) => {
+        if (removedServers.has(name)) {
+          return error(`Server "${name}" has been removed. Re-register it to use its tools.`);
+        }
+        try {
+          const result = await session.callTool(tool.name, args);
+          return formatBackendResult(result);
+        } catch (err: any) {
+          return error(`Failed to call ${name}/${tool.name}: ${err.message}`);
+        }
+      }
+    );
+  }
+
+  liveSessions.set(name, { session, toolNames: registeredToolNames });
+
+  // Persist to registry
+  const registry = loadRegistry();
+  registry.servers[name] = {
+    url,
+    addedAt: new Date().toISOString(),
+    tools: registeredToolNames,
+  };
+  saveRegistry(registry);
+
+  connectedBackends.push({ name, toolCount: tools.length });
+  console.log(`[registry] ✓ "${name}" registered with ${tools.length} tools`);
+
+  return registeredToolNames;
+}
+
+// ============================================
 // Server Setup
 // ============================================
 const server = new MCPServer({
-  name: "mcp-orchestrator",
-  title: "MCP Orchestrator",
+  name: "lark-gateway",
+  title: "Lark MCP Gateway",
   version: "1.0.0",
   description:
-    "A custom MCP orchestrator that aggregates multiple MCP servers into one unified gateway",
+    "Lark — a dynamic MCP gateway. Register your MCP servers and Lark aggregates all their tools into one endpoint.",
   baseUrl: process.env.MCP_URL || "http://localhost:3000",
-  oauth: oauthWorkOSProvider(),
   favicon: "favicon.ico",
   websiteUrl: "https://mcp-use.com",
   icons: [
@@ -173,70 +264,85 @@ function interpolateEnvVars(obj: any): any {
 }
 
 /**
- * Load mcp-servers.json, connect to each backend, discover tools,
+ * Load mcp-servers.json (hardcoded backends) AND user-servers.json
+ * (user-registered servers), connect to all of them, discover tools,
  * and register them on our server with namespaced names.
  */
 async function connectBackendServers() {
+  // --- Phase 1: Hardcoded backends from mcp-servers.json ---
   const configPath = resolve(process.cwd(), "mcp-servers.json");
 
-  if (!existsSync(configPath)) {
-    console.log("[orchestrator] No mcp-servers.json found — skipping backend connections");
-    return;
-  }
+  if (existsSync(configPath)) {
+    const configRaw = readFileSync(configPath, "utf-8");
+    const config = interpolateEnvVars(JSON.parse(configRaw));
+    const serverNames = Object.keys(config.mcpServers || {});
 
-  const configRaw = readFileSync(configPath, "utf-8");
-  const config = interpolateEnvVars(JSON.parse(configRaw));
+    if (serverNames.length > 0) {
+      console.log(`[orchestrator] Connecting to ${serverNames.length} hardcoded backend(s): ${serverNames.join(", ")}`);
+      const client = MCPClient.fromDict(config);
 
-  // Check if there are any servers configured
-  const serverNames = Object.keys(config.mcpServers || {});
-  if (serverNames.length === 0) {
-    console.log("[orchestrator] mcp-servers.json is empty — no backend servers to connect");
-    return;
-  }
+      for (const serverName of serverNames) {
+        try {
+          console.log(`[orchestrator] Connecting to "${serverName}"...`);
+          const session = await client.createSession(serverName);
+          const tools = await session.listTools();
 
-  console.log(`[orchestrator] Connecting to ${serverNames.length} backend server(s): ${serverNames.join(", ")}`);
+          console.log(`[orchestrator] "${serverName}" has ${tools.length} tool(s): ${tools.map((t: any) => t.name).join(", ")}`);
 
-  const client = MCPClient.fromDict(config);
+          for (const tool of tools) {
+            const namespacedName = `${serverName}__${tool.name}`;
 
-  for (const serverName of serverNames) {
-    try {
-      console.log(`[orchestrator] Connecting to "${serverName}"...`);
-      const session = await client.createSession(serverName);
-      const tools = await session.listTools();
-
-      console.log(`[orchestrator] "${serverName}" has ${tools.length} tool(s): ${tools.map(t => t.name).join(", ")}`);
-
-      // Register each backend tool on our server with a namespace prefix
-      for (const tool of tools) {
-        const namespacedName = `${serverName}__${tool.name}`;
-
-        server.tool(
-          {
-            name: namespacedName,
-            description: `[${serverName}] ${tool.description || tool.name}`,
-            schema: jsonSchemaToZod(tool.inputSchema),
-          },
-          async (args: any) => {
-            try {
-              const result = await session.callTool(tool.name, args);
-              return formatBackendResult(result);
-            } catch (err: any) {
-              return error(`Failed to call ${serverName}/${tool.name}: ${err.message}`);
-            }
+            server.tool(
+              {
+                name: namespacedName,
+                description: `[${serverName}] ${tool.description || tool.name}`,
+                schema: jsonSchemaToZod(tool.inputSchema),
+              },
+              async (args: any) => {
+                try {
+                  const result = await session.callTool(tool.name, args);
+                  return formatBackendResult(result);
+                } catch (err: any) {
+                  return error(`Failed to call ${serverName}/${tool.name}: ${err.message}`);
+                }
+              }
+            );
           }
-        );
-      }
 
-      connectedBackends.push({ name: serverName, toolCount: tools.length });
-      console.log(`[orchestrator] ✓ "${serverName}" registered (${tools.length} tools)`);
-    } catch (err: any) {
-      // Don't crash if one backend fails — log and continue
-      console.error(`[orchestrator] ✗ Failed to connect to "${serverName}": ${err.message}`);
+          connectedBackends.push({ name: serverName, toolCount: tools.length });
+          console.log(`[orchestrator] ✓ "${serverName}" registered (${tools.length} tools)`);
+        } catch (err: any) {
+          console.error(`[orchestrator] ✗ Failed to connect to "${serverName}": ${err.message}`);
+        }
+      }
+    } else {
+      console.log("[orchestrator] mcp-servers.json is empty — no hardcoded backends");
     }
+  } else {
+    console.log("[orchestrator] No mcp-servers.json found — skipping hardcoded backends");
+  }
+
+  // --- Phase 2: User-registered servers from user-servers.json ---
+  const registry = loadRegistry();
+  const userServerNames = Object.keys(registry.servers);
+
+  if (userServerNames.length > 0) {
+    console.log(`[registry] Reconnecting ${userServerNames.length} user-registered server(s): ${userServerNames.join(", ")}`);
+
+    for (const serverName of userServerNames) {
+      const entry = registry.servers[serverName];
+      try {
+        await connectAndRegisterServer(serverName, entry.url);
+      } catch (err: any) {
+        console.error(`[registry] ✗ Failed to reconnect "${serverName}" (${entry.url}): ${err.message}`);
+      }
+    }
+  } else {
+    console.log("[registry] No user-registered servers to reconnect");
   }
 
   const totalTools = connectedBackends.reduce((sum, b) => sum + b.toolCount, 0);
-  console.log(`[orchestrator] Done. ${connectedBackends.length}/${serverNames.length} backends connected, ${totalTools} tools registered.`);
+  console.log(`[orchestrator] Startup complete. ${connectedBackends.length} backend(s) connected, ${totalTools} total tools registered.`);
 }
 
 // ============================================
@@ -304,6 +410,165 @@ server.tool(
     delete contacts[key];
     saveContacts(contacts);
     return object({ removed: true, name: key, totalContacts: Object.keys(contacts).length });
+  }
+);
+
+// ============================================
+// Gateway Tool: Register an MCP server
+// ============================================
+server.tool(
+  {
+    name: "register-mcp",
+    description:
+      "Register a new MCP server with Lark. Paste a server URL and give it a name. Lark will connect, discover all its tools, and make them available. Example: register-mcp('my-notion', 'https://notion-mcp.example.com/mcp')",
+    schema: z.object({
+      name: z
+        .string()
+        .describe(
+          "A short, unique name for this server (e.g. 'notion', 'twilio', 'my-api'). Used as a prefix for all its tools."
+        ),
+      url: z
+        .string()
+        .describe(
+          "The full MCP server URL (e.g. 'https://my-server.run.mcp-use.com/mcp')"
+        ),
+    }),
+  },
+  async ({ name, url }) => {
+    const safeName = name
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/-+/g, "-");
+
+    // Check if already registered
+    const registry = loadRegistry();
+    if (registry.servers[safeName] && !removedServers.has(safeName)) {
+      return error(
+        `Server "${safeName}" is already registered with ${registry.servers[safeName].tools.length} tools. Use remove-mcp first to re-register.`
+      );
+    }
+
+    // If it was previously removed, clear the flag so the tools work again
+    removedServers.delete(safeName);
+
+    try {
+      const toolNames = await connectAndRegisterServer(safeName, url);
+      return object({
+        registered: true,
+        name: safeName,
+        url,
+        toolCount: toolNames.length,
+        tools: toolNames,
+        message: `Successfully registered "${safeName}" with ${toolNames.length} tool(s). You can now use them directly.`,
+      });
+    } catch (err: any) {
+      return error(
+        `Failed to connect to "${safeName}" at ${url}: ${err.message}`
+      );
+    }
+  }
+);
+
+// ============================================
+// Gateway Tool: List all registered MCP servers
+// ============================================
+server.tool(
+  {
+    name: "list-mcps",
+    description:
+      "List all MCP servers registered with Lark, including their URLs, tool counts, and tool names. Shows both hardcoded backends and user-registered servers.",
+    schema: z.object({}),
+    readOnlyHint: true,
+  },
+  async () => {
+    const registry = loadRegistry();
+    const userServers = Object.entries(registry.servers)
+      .filter(([name]) => !removedServers.has(name))
+      .map(([name, info]) => ({
+        name,
+        url: info.url,
+        addedAt: info.addedAt,
+        toolCount: info.tools.length,
+        tools: info.tools,
+        source: "user-registered" as const,
+      }));
+
+    const hardcodedServers = connectedBackends
+      .filter((b) => !registry.servers[b.name])
+      .map((b) => ({
+        name: b.name,
+        toolCount: b.toolCount,
+        source: "hardcoded" as const,
+      }));
+
+    const totalServers = userServers.length + hardcodedServers.length;
+    const totalTools =
+      userServers.reduce((s, sv) => s + sv.toolCount, 0) +
+      hardcodedServers.reduce((s, sv) => s + sv.toolCount, 0);
+
+    if (totalServers === 0) {
+      return text(
+        "No MCP servers registered yet. Use register-mcp to add one."
+      );
+    }
+
+    return object({
+      totalServers,
+      totalTools,
+      userRegistered: userServers,
+      hardcoded: hardcodedServers,
+    });
+  }
+);
+
+// ============================================
+// Gateway Tool: Remove a registered MCP server
+// ============================================
+server.tool(
+  {
+    name: "remove-mcp",
+    description:
+      "Remove a previously registered MCP server from Lark. Its tools will stop working immediately. Use list-mcps to see registered servers.",
+    schema: z.object({
+      name: z
+        .string()
+        .describe("The name of the server to remove (as shown in list-mcps)"),
+    }),
+  },
+  async ({ name }) => {
+    const safeName = name.toLowerCase();
+    const registry = loadRegistry();
+
+    if (!registry.servers[safeName]) {
+      return error(
+        `Server "${safeName}" not found. Use list-mcps to see registered servers.`
+      );
+    }
+
+    const removedTools = registry.servers[safeName].tools;
+
+    // Mark as removed so proxied calls are blocked
+    removedServers.add(safeName);
+    liveSessions.delete(safeName);
+
+    // Remove from persisted registry
+    delete registry.servers[safeName];
+    saveRegistry(registry);
+
+    // Also remove from connectedBackends tracking
+    const idx = connectedBackends.findIndex((b) => b.name === safeName);
+    if (idx !== -1) connectedBackends.splice(idx, 1);
+
+    console.log(
+      `[registry] ✗ Removed "${safeName}" (${removedTools.length} tools disabled)`
+    );
+
+    return object({
+      removed: true,
+      name: safeName,
+      disabledTools: removedTools,
+      message: `Removed "${safeName}". Its ${removedTools.length} tool(s) are now disabled.`,
+    });
   }
 );
 
@@ -724,14 +989,25 @@ server.resource(
     description: "Current server configuration and status",
     mimeType: "application/json",
   },
-  async () =>
-    object({
-      name: "MCP Orchestrator",
+  async () => {
+    const registry = loadRegistry();
+    const userServers = Object.entries(registry.servers)
+      .filter(([name]) => !removedServers.has(name))
+      .map(([name, info]) => ({
+        name,
+        url: info.url,
+        toolCount: info.tools.length,
+      }));
+
+    return object({
+      name: "Lark MCP Gateway",
       version: "1.0.0",
       status: "running",
       connectedServers: connectedBackends.length,
       backends: connectedBackends,
-    })
+      userRegistered: userServers,
+    });
+  }
 );
 
 // ============================================
