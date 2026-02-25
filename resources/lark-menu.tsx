@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { McpUseProvider, useWidget, useWidgetTheme, type WidgetMetadata } from "mcp-use/react";
 import { z } from "zod";
 
@@ -212,7 +212,13 @@ function LarkMenuContent() {
 }
 
 export default function LarkMenu() {
-  const { props } = useWidget<Props>();
+  const { props, requestDisplayMode } = useWidget<Props>();
+
+  useEffect(() => {
+    if (requestDisplayMode) {
+      requestDisplayMode("pip").catch(() => {});
+    }
+  }, [requestDisplayMode]);
 
   return (
     <McpUseProvider autoSize>
