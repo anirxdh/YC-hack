@@ -1,3 +1,13 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "agent-chat-mcp": {
+      "url": "https://summer-poetry-bwin6.run.mcp-use.com/mcp"
+    },
+    "music-player-mcp": {
+      "url": "https://young-surf-xt5j8.run.mcp-use.com/mcp"
+    },
+    "youtube-mcp": {
+      "url": "https://still-thunder-8btdl.run.mcp-use.com/mcp"
+    }
+  }
 }

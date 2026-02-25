@@ -130,11 +130,19 @@ function jsonSchemaToZod(inputSchema: any): z.ZodObject<any> {
 
 /**
  * Convert a backend CallToolResult into an mcp-use server response.
+ * Passes through widget/resource responses (structuredContent, _meta) so UIs render.
  */
 function formatBackendResult(result: any) {
   if (result.isError) {
     const msg = result.content?.[0]?.text || "Tool execution failed";
     return error(msg);
+  }
+
+  // Pass through widget/resource responses so music-player, youtube-player, agent-chat UIs render
+  const hasWidget = result.structuredContent != null || result._meta != null;
+  const hasResourceContent = result.content?.some((c: any) => c.type === "resource" || c.resource);
+  if (hasWidget || hasResourceContent) {
+    return result;
   }
 
   const textParts = result.content
@@ -143,7 +151,6 @@ function formatBackendResult(result: any) {
 
   if (textParts && textParts.length > 0) {
     const combined = textParts.join("\n");
-    // Try parsing as JSON for structured responses
     try {
       return object(JSON.parse(combined));
     } catch {
@@ -273,13 +280,17 @@ server.tool(
       name: z.string().describe("The contact's name (e.g. 'Anirudh')"),
       phone: z.string().describe("The contact's phone number with country code (e.g. '+19525551234')"),
     }),
+    widget: { name: "add-contact", invoking: "Saving contact...", invoked: "Contact saved" },
   },
   async ({ name, phone }, ctx) => {
     const contacts = loadContacts();
     contacts[name] = phone;
     saveContacts(contacts);
     ctx?.sendNotification?.("custom/contact-added", { name, phone, totalContacts: Object.keys(contacts).length });
-    return object({ saved: true, name, phone, totalContacts: Object.keys(contacts).length });
+    return widget({
+      props: { saved: true, name, phone, totalContacts: Object.keys(contacts).length },
+      output: text(`Saved ${name} (${phone}). ${Object.keys(contacts).length} contact(s) total.`),
+    });
   }
 );
 
@@ -292,16 +303,19 @@ server.tool(
     description: "List all saved contacts. Returns all names and phone numbers.",
     schema: z.object({}),
     readOnlyHint: true,
+    widget: { name: "list-contacts", invoking: "Loading contacts...", invoked: "Contacts loaded" },
   },
   async () => {
     const contacts = loadContacts();
     const entries = Object.entries(contacts);
-    if (entries.length === 0) {
-      return text("No contacts saved yet. Use add-contact to save some.");
-    }
-    return object({
-      totalContacts: entries.length,
-      contacts: Object.fromEntries(entries),
+    return widget({
+      props: {
+        totalContacts: entries.length,
+        contacts: Object.fromEntries(entries),
+      },
+      output: text(entries.length === 0
+        ? "No contacts saved yet. Use add-contact to save some."
+        : `Found ${entries.length} contact(s): ${entries.map(([n, p]) => `${n} (${p})`).join(", ")}`),
     });
   }
 );
@@ -316,6 +330,7 @@ server.tool(
     schema: z.object({
       name: z.string().describe("The name of the contact to remove"),
     }),
+    widget: { name: "remove-contact", invoking: "Removing contact...", invoked: "Contact removed" },
   },
   async ({ name }, ctx) => {
     const contacts = loadContacts();
@@ -328,7 +343,10 @@ server.tool(
     delete contacts[key];
     saveContacts(contacts);
     ctx?.sendNotification?.("custom/contact-removed", { name: key, totalContacts: Object.keys(contacts).length });
-    return object({ removed: true, name: key, totalContacts: Object.keys(contacts).length });
+    return widget({
+      props: { removed: true, name: key, totalContacts: Object.keys(contacts).length },
+      output: text(`Removed ${key}. ${Object.keys(contacts).length} contact(s) remaining.`),
+    });
   }
 );
 
@@ -526,6 +544,7 @@ server.tool(
       to: z.array(z.string()).describe("List of phone numbers or contact names to call (e.g. ['Anirudh', 'Raj', '+19525551234'])"),
       message: z.string().describe("The message to speak to everyone when they pick up"),
     }),
+    widget: { name: "group-call", invoking: "Placing group call...", invoked: "Group call initiated" },
   },
   async ({ to, message }, ctx) => {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -589,11 +608,13 @@ server.tool(
     const succeeded: { label: string; callSid: string }[] = [];
     const failed: { label: string; error: string }[] = [];
 
-    for (const r of results) {
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const contact = resolved[i];
       if (r.status === "fulfilled") {
         succeeded.push(r.value);
       } else {
-        failed.push({ label: "unknown", error: r.reason?.message || "Unknown error" });
+        failed.push({ label: contact.label, error: r.reason?.message || "Unknown error" });
       }
     }
 
@@ -610,14 +631,16 @@ server.tool(
       failed: failed.length,
     });
 
-    return object({
-      message,
-      totalCalls: resolved.length,
-      succeeded: succeeded.length,
-      failed: failed.length,
-      calls: succeeded,
-      errors: failed.length > 0 ? failed : undefined,
-      summary,
+    return widget({
+      props: {
+        message,
+        totalCalls: resolved.length,
+        succeeded: succeeded.length,
+        failed: failed.length,
+        calls: succeeded,
+        errors: failed.length > 0 ? failed : undefined,
+      },
+      output: text(summary),
     });
   }
 );

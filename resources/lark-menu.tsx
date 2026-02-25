@@ -13,14 +13,29 @@ export const widgetMetadata: WidgetMetadata = {
 
 type Props = z.infer<typeof propSchema>;
 
-const TOOLS = [
-  { id: "add-contact", label: "Add Contact", icon: "user-plus", color: "#10b981" },
-  { id: "list-contacts", label: "Contacts", icon: "users", color: "#3b82f6" },
-  { id: "remove-contact", label: "Remove Contact", icon: "user-minus", color: "#ef4444" },
-  { id: "make-call", label: "Call", icon: "phone", color: "#22c55e" },
-  { id: "send-sms", label: "SMS", icon: "message", color: "#6366f1" },
-  { id: "open-camera", label: "Camera", icon: "camera", color: "#06b6d4" },
-  { id: "group-call", label: "Group Call", icon: "phone-call", color: "#f59e0b" },
+type ToolEntry = { id: string; label: string; icon: string; color: string; prompt?: string };
+const TOOLS: ToolEntry[] = [
+  // Lark (contacts & comms)
+  { id: "add-contact", label: "Add Contact", icon: "user-plus", color: "#10b981", prompt: "add contact [name] [phone]" },
+  { id: "list-contacts", label: "Contacts", icon: "users", color: "#3b82f6", prompt: "list contacts" },
+  { id: "remove-contact", label: "Remove Contact", icon: "user-minus", color: "#ef4444", prompt: "remove contact [name]" },
+  { id: "make-call", label: "Call", icon: "phone", color: "#22c55e", prompt: "call [name] and say [message]" },
+  { id: "send-sms", label: "SMS", icon: "message", color: "#6366f1", prompt: "send sms to [name] [message]" },
+  { id: "open-camera", label: "Camera", icon: "camera", color: "#06b6d4", prompt: "open camera" },
+  { id: "group-call", label: "Group Call", icon: "phone-call", color: "#f59e0b", prompt: "group call [names] and say [message]" },
+  // Agent Chat
+  { id: "agent-chat-mcp__register", label: "Agent Chat: Register", icon: "message-square", color: "#8b5cf6", prompt: "register as agent [name]" },
+  { id: "agent-chat-mcp__send-message", label: "Agent Chat: Send", icon: "send", color: "#a855f7", prompt: "send message to [agent] [message]" },
+  { id: "agent-chat-mcp__read-inbox", label: "Agent Chat: Inbox", icon: "inbox", color: "#7c3aed", prompt: "read inbox as [agent]" },
+  { id: "agent-chat-mcp__list-agents", label: "Agent Chat: Agents", icon: "users", color: "#6d28d9", prompt: "list agents" },
+  // Music Player
+  { id: "music-player-mcp__play", label: "Play Music", icon: "music", color: "#ec4899", prompt: "play [song name]" },
+  { id: "music-player-mcp__search", label: "Search Music", icon: "search", color: "#f472b6", prompt: "search music [query]" },
+  { id: "music-player-mcp__add-to-queue", label: "Music: Add to Queue", icon: "list", color: "#db2777", prompt: "add [song] to queue" },
+  // YouTube
+  { id: "youtube-mcp__play", label: "Play YouTube", icon: "video", color: "#ef4444", prompt: "play [video or search]" },
+  { id: "youtube-mcp__search", label: "Search YouTube", icon: "search", color: "#f87171", prompt: "search youtube [query]" },
+  { id: "youtube-mcp__add-to-queue", label: "YouTube: Add to Queue", icon: "list", color: "#dc2626", prompt: "add [video] to youtube queue" },
 ];
 
 function Icon({ name, size = 20, color = "currentColor" }: { name: string; size?: number; color?: string }) {
@@ -66,16 +81,63 @@ function Icon({ name, size = 20, color = "currentColor" }: { name: string; size?
         <path d="M16 8a2 2 0 014 0v1a2 2 0 01-2 2h-1" />
       </>
     ),
+    "message-square": (
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    ),
+    send: (
+      <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+    ),
+    inbox: (
+      <path d="M22 12h-6l-2 3H10l-2-3H2" />
+    ),
+    music: (
+      <>
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </>
+    ),
+    search: (
+      <circle cx="11" cy="11" r="8" />
+      <path d="M21 21l-4.35-4.35" />
+    ),
+    list: (
+      <>
+        <line x1="8" y1="6" x2="21" y2="6" />
+        <line x1="8" y1="12" x2="21" y2="12" />
+        <line x1="8" y1="18" x2="21" y2="18" />
+        <circle cx="4" cy="6" r="1.5" fill="none" />
+        <circle cx="4" cy="12" r="1.5" fill="none" />
+        <circle cx="4" cy="18" r="1.5" fill="none" />
+      </>
+    ),
+    video: (
+      <>
+        <polygon points="23 7 16 12 23 17 23 7" />
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+      </>
+    ),
   };
   const paths = icons[name] || icons.users;
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: "block", flexShrink: 0 }}
+    >
       {paths}
     </svg>
   );
 }
 
 function LarkMenuContent() {
+  const { displayMode } = useWidget<Props>();
   const theme = useWidgetTheme();
   const isDark = theme === "dark";
   const [expanded, setExpanded] = useState(true);
@@ -140,7 +202,9 @@ function LarkMenuContent() {
             </div>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700, color: textColor }}>Lark</div>
-              <div style={{ fontSize: 11, color: mutedColor, fontWeight: 500 }}>Your tools</div>
+              <div style={{ fontSize: 11, color: mutedColor, fontWeight: 500 }}>
+                {displayMode === "pip" ? "Floating" : displayMode === "fullscreen" ? "Fullscreen" : "Your tools"}
+              </div>
             </div>
           </div>
         )}
@@ -201,7 +265,7 @@ function LarkMenuContent() {
             {expanded && (
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: textColor }}>{tool.label}</div>
-                <div style={{ fontSize: 11, color: mutedColor }}>Say &quot;{tool.id.replace(/-/g, " ")}&quot;</div>
+                <div style={{ fontSize: 11, color: mutedColor }}>Say &quot;{tool.prompt || tool.id.replace(/-/g, " ")}&quot;</div>
               </div>
             )}
           </div>
