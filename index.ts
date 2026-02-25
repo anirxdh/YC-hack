@@ -239,6 +239,28 @@ async function connectBackendServers() {
 }
 
 // ============================================
+// Local Tool 0: Open Lark — slide menu with all tool icons
+// ============================================
+server.tool(
+  {
+    name: "open-lark",
+    description: "Open the Lark app launcher — a slide menu bar showing all available tools with icons. Call this when the user says 'open lark', 'show apps', 'show my tools', or wants to see what they can do.",
+    schema: z.object({}),
+    widget: {
+      name: "lark-menu",
+      invoking: "Opening Lark...",
+      invoked: "Lark ready",
+    },
+  },
+  async () => {
+    return widget({
+      props: { open: true },
+      output: text("Lark menu opened. You can add contacts, make calls, send SMS, use the camera, or group call."),
+    });
+  }
+);
+
+// ============================================
 // Local Tool 1: Add a contact
 // ============================================
 server.tool(
