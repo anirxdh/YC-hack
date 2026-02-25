@@ -252,7 +252,9 @@ server.tool(
       invoked: "Lark ready",
     },
   },
-  async () => {
+  async (_args, ctx) => {
+    const toolIds = ["add-contact", "list-contacts", "remove-contact", "make-call", "send-sms", "open-camera", "group-call"];
+    ctx?.sendNotification?.("custom/lark-opened", { tools: toolIds });
     return widget({
       props: { open: true },
       output: text("Lark menu opened. You can add contacts, make calls, send SMS, use the camera, or group call."),
@@ -272,10 +274,11 @@ server.tool(
       phone: z.string().describe("The contact's phone number with country code (e.g. '+19525551234')"),
     }),
   },
-  async ({ name, phone }) => {
+  async ({ name, phone }, ctx) => {
     const contacts = loadContacts();
     contacts[name] = phone;
     saveContacts(contacts);
+    ctx?.sendNotification?.("custom/contact-added", { name, phone, totalContacts: Object.keys(contacts).length });
     return object({ saved: true, name, phone, totalContacts: Object.keys(contacts).length });
   }
 );
@@ -314,7 +317,7 @@ server.tool(
       name: z.string().describe("The name of the contact to remove"),
     }),
   },
-  async ({ name }) => {
+  async ({ name }, ctx) => {
     const contacts = loadContacts();
     const key = Object.keys(contacts).find(
       (k) => k.toLowerCase() === name.toLowerCase()
@@ -324,6 +327,7 @@ server.tool(
     }
     delete contacts[key];
     saveContacts(contacts);
+    ctx?.sendNotification?.("custom/contact-removed", { name: key, totalContacts: Object.keys(contacts).length });
     return object({ removed: true, name: key, totalContacts: Object.keys(contacts).length });
   }
 );
@@ -346,7 +350,7 @@ server.tool(
       invoked: "Call placed",
     },
   },
-  async ({ to, message }) => {
+  async ({ to, message }, ctx) => {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const fromNumber = process.env.TWILIO_PHONE_NUMBER;
@@ -387,6 +391,7 @@ server.tool(
     }
 
     const call = await res.json();
+    ctx?.sendNotification?.("custom/call-initiated", { to: contactLabel, callSid: call.sid });
     return widget({
       props: {
         status: "Call initiated",
@@ -418,7 +423,7 @@ server.tool(
       invoked: "Message sent",
     },
   },
-  async ({ to, message }) => {
+  async ({ to, message }, ctx) => {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const fromNumber = process.env.TWILIO_PHONE_NUMBER;
@@ -457,6 +462,7 @@ server.tool(
     }
 
     const sms = await res.json();
+    ctx?.sendNotification?.("custom/sms-sent", { to: contactLabel, messageSid: sms.sid });
     return widget({
       props: {
         status: "SMS sent",
@@ -493,9 +499,10 @@ server.tool(
       invoked: "Camera ready",
     },
   },
-  async ({ camera, reason }) => {
+  async ({ camera, reason }, ctx) => {
     const selectedCamera = camera || "front";
     const displayReason = reason || "Photo capture";
+    ctx?.sendNotification?.("custom/camera-opened", { camera: selectedCamera, reason: displayReason });
 
     return widget({
       props: {
@@ -520,7 +527,7 @@ server.tool(
       message: z.string().describe("The message to speak to everyone when they pick up"),
     }),
   },
-  async ({ to, message }) => {
+  async ({ to, message }, ctx) => {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const fromNumber = process.env.TWILIO_PHONE_NUMBER;
@@ -596,6 +603,12 @@ server.tool(
       ...succeeded.map((s) => `  ✓ ${s.label} — SID: ${s.callSid}`),
       ...failed.map((f) => `  ✗ ${f.label} — ${f.error}`),
     ].join("\n");
+
+    ctx?.sendNotification?.("custom/group-call-initiated", {
+      totalCalls: resolved.length,
+      succeeded: succeeded.length,
+      failed: failed.length,
+    });
 
     return object({
       message,

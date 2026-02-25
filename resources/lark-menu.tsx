@@ -216,6 +216,7 @@ export default function LarkMenu() {
 
   useEffect(() => {
     if (requestDisplayMode) {
+      // pip = floating window that stays sticky/visible while scrolling
       requestDisplayMode("pip").catch(() => {});
     }
   }, [requestDisplayMode]);
