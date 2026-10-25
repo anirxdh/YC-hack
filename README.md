@@ -1,5 +1,7 @@
 # Lark
 
+> **Write-up:** [How Lark Turns ChatGPT Into a Phone With One MCP Gateway](https://anirudhvasudevan.com/blog/lark-multi-agent-mcp/), the architecture, decisions and lessons. Built by [Anirudh Vasudevan](https://anirudhvasudevan.com/).
+
 **AI should do things, not just say things.**
 
 ---
